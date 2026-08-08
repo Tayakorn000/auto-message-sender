@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Messenger",
+  "version": "1.6.0",
+  "permissions": [
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://*.facebook.com/*",
+    "*://*.messenger.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.facebook.com/*", "*://*.messenger.com/*"],
+      "js": ["content.js"]
+    }
+  ]
+}

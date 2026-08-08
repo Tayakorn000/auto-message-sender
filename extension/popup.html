@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <title>ตั้งค่าบอท</title>
+    <style>
+        body { font-family: Tahoma, sans-serif; padding: 15px; width: 220px; text-align: center; background-color: #f4f6f9; }
+        select, button { width: 100%; padding: 8px; margin-top: 10px; font-size: 14px; }
+        button { background-color: #198754; color: white; border: none; cursor: pointer; border-radius: 4px; font-weight: bold;}
+        button:hover { background-color: #157347; }
+    </style>
+</head>
+<body>
+    <h3 style="margin-top:0; color: #2c3e50;">🤖 ตั้งค่า Chrome บอท</h3>
+
+    <label style="font-size: 13px; font-weight: bold;">เลือก Preset ประจำจอนี้:</label>
+    <select id="presetGroup">
+        <option value="profile_1">✅ Preset 1</option>
+        <option value="profile_2">✅ Preset 2</option>
+        <option value="profile_3">✅ Preset 3</option>
+    </select>
+
+    <button id="saveBtn">💾 บันทึกการตั้งค่า</button>
+
+    <script src="popup.js"></script>
+</body>
+</html>

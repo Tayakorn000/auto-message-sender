@@ -1,0 +1,162 @@
+"""เทสว่าบอทยังกดปุ่ม "เริ่มต้นใช้งาน" เองก่อนพิมพ์ ถึงแม้จะหากล่องพิมพ์เจอตั้งแต่รอบแรก
+
+โค้ดหากล่องตัวใหม่เจอเร็วกว่าเดิมมาก ถ้าไม่รอ ปุ่ม "เริ่มต้นใช้งาน" ที่ยัง render ไม่เสร็จ
+จะไม่ถูกกด แล้วพิมพ์ลงกล่องที่ยังใช้งานไม่ได้ = ส่งไม่ออก
+
+ดึง forceSend + findInputEl ตัวจริงจาก content.js มารัน (ไม่ก๊อปโค้ดมาวางซ้ำ)
+รัน: python3 test_get_started.py
+"""
+import http.server
+import json
+import os
+import re
+import socketserver
+import subprocess
+import sys
+import threading
+import time
+
+PORT = 8784
+RESULTS = []
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+SRC = open(os.path.join(HERE, "content.js"), encoding="utf-8").read()
+FUNCS = []
+for name in ("findInputEl", "forceSend"):
+    m = re.search(r"^function %s\(.*?^\}" % name, SRC, re.S | re.M)
+    if not m:
+        sys.exit("FAIL: หา function %s ใน content.js ไม่เจอ" % name)
+    FUNCS.append(m.group(0))
+CODE = "\n\n".join(FUNCS)
+
+PAGE = """<!doctype html><meta charset=utf-8><title>get started probe</title>
+<body style="font-family:sans-serif">
+<div id="stage"></div>
+<script>
+CODE_
+
+const order = [];
+// stub: แทนการพิมพ์จริง แค่บันทึกว่าถูกเรียกตอนไหน
+function executeSendSteps(inputEl, text, resolve, mode) {
+  order.push("type:" + (inputEl.id || inputEl.tagName));
+  resolve();
+}
+
+const COMPOSER = '<div role="textbox" contenteditable="true" aria-label="ข้อความ" ' +
+                 'id="composer" style="width:300px;height:30px"></div>';
+
+function addGetStarted() {
+  const b = document.createElement('div');
+  b.setAttribute('role', 'button');
+  b.id = 'gs';
+  b.style.cssText = 'width:120px;height:30px';
+  b.innerText = 'เริ่มต้นใช้งาน';
+  b.addEventListener('click', () => order.push('click:gs'));
+  document.getElementById('stage').appendChild(b);
+}
+
+async function run() {
+  const out = {};
+  const stage = document.getElementById('stage');
+
+  // เคส 1: กล่องพิมพ์มีตั้งแต่แรก ปุ่มเพิ่งโผล่ตอน 100 ms ต้องกดปุ่มก่อนพิมพ์
+  stage.innerHTML = COMPOSER;
+  order.length = 0;
+  setTimeout(addGetStarted, 100);
+  let t0 = performance.now();
+  await forceSend('hi', 'messenger', false, true);
+  out.late_button = { order: order.slice(), ms: Math.round(performance.now() - t0) };
+
+  // เคส 2: หน้าโหลดช้า กล่องพิมพ์เพิ่งมา 500 ms ปุ่มตาม 600 ms
+  // (เคสนี้พังถ้าไปใช้ retryCount ร่วมกับลูปหากล่อง เพราะโควตาถูกใช้หมดก่อน)
+  stage.innerHTML = '';
+  order.length = 0;
+  setTimeout(() => { stage.innerHTML = COMPOSER; }, 500);
+  setTimeout(addGetStarted, 600);
+  t0 = performance.now();
+  await forceSend('hi', 'messenger', false, true);
+  out.slow_page = { order: order.slice(), ms: Math.round(performance.now() - t0) };
+
+  // เคส 3: ลิงก์เพจ แต่ไม่มีปุ่มเลย ต้องพิมพ์ได้ ไม่ค้าง
+  stage.innerHTML = COMPOSER;
+  order.length = 0;
+  t0 = performance.now();
+  await forceSend('hi', 'messenger', false, true);
+  out.page_no_button = { order: order.slice(), ms: Math.round(performance.now() - t0) };
+
+  // เคส 4: แชทคนธรรมดา (ไม่ใช่ลิงก์เพจ) ต้องไม่เสียเวลารอปุ่มเลย
+  stage.innerHTML = COMPOSER;
+  order.length = 0;
+  t0 = performance.now();
+  await forceSend('hi', 'messenger', false, false);
+  out.normal_chat = { order: order.slice(), ms: Math.round(performance.now() - t0) };
+
+  fetch('http://127.0.0.1:PORT_/result', {method:'POST', body: JSON.stringify(out)});
+}
+run();
+</script>
+</body>"""
+
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = PAGE.replace("CODE_", CODE).replace("PORT_", str(PORT))
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(body.encode())
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0))
+        RESULTS.append(json.loads(self.rfile.read(n) or b"{}"))
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, *a):
+        pass
+
+
+def chrome_path():
+    for p in ("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+              r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+              r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"):
+        if os.path.exists(p):
+            return p
+    sys.exit("ไม่พบ Chrome")
+
+
+def main():
+    socketserver.TCPServer.allow_reuse_address = True
+    srv = socketserver.TCPServer(("127.0.0.1", PORT), Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    p = subprocess.Popen([chrome_path(), "--user-data-dir=/tmp/getstartedprobe",
+                          "--no-first-run", "--headless=new",
+                          "http://127.0.0.1:%d/" % PORT],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    deadline = time.time() + 30
+    while time.time() < deadline and not RESULTS:
+        time.sleep(0.3)
+    p.terminate()
+    srv.shutdown()
+
+    if not RESULTS:
+        sys.exit("FAIL: หน้าเทสไม่ตอบกลับ")
+    res = RESULTS[0]
+    print(json.dumps(res, ensure_ascii=False, indent=1))
+
+    for case in ("late_button", "slow_page"):
+        if res[case]["order"] != ["click:gs", "type:composer"]:
+            sys.exit("FAIL: %s ไม่ได้กดปุ่มก่อนพิมพ์ -> %s" % (case, res[case]["order"]))
+    for case in ("page_no_button", "normal_chat"):
+        if res[case]["order"] != ["type:composer"]:
+            sys.exit("FAIL: %s พิมพ์ไม่ได้ -> %s" % (case, res[case]["order"]))
+    if res["page_no_button"]["ms"] > 1500:
+        sys.exit("FAIL: ลิงก์เพจไม่มีปุ่ม แต่รอนานเกินไป %d ms" % res["page_no_button"]["ms"])
+    if res["normal_chat"]["ms"] > 100:
+        sys.exit("FAIL: แชทคนธรรมดาเสียเวลารอปุ่ม %d ms" % res["normal_chat"]["ms"])
+    print("OK: กดปุ่มเริ่มต้นใช้งานก่อนพิมพ์เสมอ ไม่ค้างเมื่อไม่มีปุ่ม "
+          "และแชทคนธรรมดาไม่เสียเวลารอ")
+
+
+if __name__ == "__main__":
+    main()
