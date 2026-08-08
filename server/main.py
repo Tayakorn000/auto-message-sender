@@ -14,7 +14,7 @@ from flask_cors import CORS
 # ==========================================
 # 0. อัปเดตอัตโนมัติ (ดูเวอร์ชันจาก GitHub Release)
 # ==========================================
-APP_VERSION = "1.6.0"
+APP_VERSION = "1.6.1"
 UPDATE_REPO = "Tayakorn000/auto-message-sender"
 UPDATE_API = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -179,6 +179,13 @@ def run_api_server():
     import logging
     log = logging.getLogger('werkzeug')
     log.setLevel(logging.ERROR)
+    # ponytail: build แบบ --windowed ทำให้ sys.stdout/stderr เป็น None
+    # werkzeug พิมพ์ banner ตอนสตาร์ท -> thread ตายเงียบ ๆ API ไม่ขึ้นเลย
+    # (วัดแล้ว: รันจาก main.py ตอบ /api/get-task ปกติ แต่ .exe ไม่ listen port 5000)
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w")
     app.run(port=5000, debug=False, use_reloader=False)
 
 

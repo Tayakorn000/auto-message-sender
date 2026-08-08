@@ -32,12 +32,12 @@ function runOnce(task, tabs) {
             },
             runtime: {
                 onMessage: { addListener: () => {} },
-                getManifest: () => ({ version: '1.6.0' }),
+                getManifest: () => ({ version: '1.6.1' }),
             },
         },
         fetch: async (url) => {
             if (url.includes('/api/get-task/')) {
-                assert.ok(url.includes('v=1.6.0'), 'ต้องบอกเวอร์ชันส่วนขยายไปด้วย: ' + url);
+                assert.ok(url.includes('v=1.6.1'), 'ต้องบอกเวอร์ชันส่วนขยายไปด้วย: ' + url);
                 const body = served ? { status: 'no_task' }
                                     : Object.assign({ status: 'has_task', task_id: 1 }, task);
                 served = true;

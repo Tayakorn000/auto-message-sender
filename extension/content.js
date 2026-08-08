@@ -378,7 +378,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             for (let i = 0; i < limit; i++) {
                 try {
-                    await forceSend(text, mode, isPhotoTarget, isPageLink);
+                    await forceSend(text, mode, isPhotoTarget);
                     if (i < limit - 1) await new Promise(resolve => setTimeout(resolve, 1500)); 
                 } catch (err) {
                     sendResponse({ status: "error", error: err.message });
@@ -451,8 +451,12 @@ function findInputEl(mode, isPhotoTarget) {
             ? el : lowest, null);
 }
 
+// ponytail: จำว่ารู้ผลเรื่องปุ่ม "เริ่มต้นใช้งาน" แล้ว (กดไปแล้ว หรือรอจนครบแล้วไม่มี)
+// ครั้งต่อไปในหน้าเดิมจะได้ไม่ต้องรออีก ไม่งั้นส่ง 1000 ครั้ง = รอเปล่ารอบละ 500 ms
+let gsSettled = false;
+
 // 🟢 แยกระหว่าง "กล่องคอมเมนต์" กับ "กล่องแชท" อย่างเด็ดขาด!
-function forceSend(text, mode, isPhotoTarget = false, isPageLink = false) {
+function forceSend(text, mode, isPhotoTarget = false) {
     return new Promise((resolve, reject) => {
         let retryCount = 0;
         const maxRetries = 300;
@@ -469,7 +473,8 @@ function forceSend(text, mode, isPhotoTarget = false, isPageLink = false) {
                 
                 if (getStartedBtns.length > 0 && getStartedBtns[0].offsetWidth > 0) {
                     getStartedBtns[0].click();
-                    getStartedClicked = true; 
+                    getStartedClicked = true;
+                    gsSettled = true;
                     setTimeout(tryFindInput, 300); 
                     return;
                 }
@@ -477,15 +482,19 @@ function forceSend(text, mode, isPhotoTarget = false, isPageLink = false) {
 
             let inputEl = findInputEl(mode, isPhotoTarget);
 
-            // ponytail: เฉพาะลิงก์เพจ รอปุ่ม "เริ่มต้นใช้งาน" ได้อีก 500 ms หลังเจอกล่องพิมพ์
+            // ponytail: รอปุ่ม "เริ่มต้นใช้งาน" ได้อีกไม่เกิน 500 ms หลังเจอกล่องพิมพ์
             // โค้ดหากล่องตัวใหม่เจอกล่องเร็วกว่าที่ Facebook จะ render ปุ่มเสร็จ
             // ไม่รอ = ปุ่มไม่ถูกกด แล้วพิมพ์ลงกล่องที่ยังใช้งานไม่ได้ ส่งไม่ออก
-            // แชทคนธรรมดา (ไม่ใช่เพจ) ไม่มีปุ่มนี้ เลยไม่ต้องเสียเวลารอ
-            if (inputEl && isPageLink && !getStartedClicked && gsWaits < 50 &&
+            // ไม่ผูกกับ is_page_link แล้ว — ลืมติ๊กช่อง "นี่คือลิงก์หน้าเพจ" ทีเดียวพังทั้งงาน
+            // ยอมเสีย 500 ms ครั้งเดียวต่อหน้า (gsSettled) แลกกับไม่ต้องพึ่งคนติ๊กถูก
+            if (inputEl && !gsSettled && !getStartedClicked &&
                 (mode === "messenger" || mode === "all")) {
-                gsWaits++;
-                setTimeout(tryFindInput, 10);
-                return;
+                if (gsWaits < 50) {
+                    gsWaits++;
+                    setTimeout(tryFindInput, 10);
+                    return;
+                }
+                gsSettled = true; // รอครบแล้วไม่มีปุ่ม = แชทธรรมดา ครั้งต่อไปไม่ต้องรอ
             }
 
             if (inputEl) {

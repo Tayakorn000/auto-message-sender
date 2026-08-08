@@ -22,6 +22,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 SRC = open(os.path.join(HERE, "content.js"), encoding="utf-8").read()
 FUNCS = []
+m = re.search(r"^let gsSettled = false;$", SRC, re.M)
+if not m:
+    sys.exit("FAIL: หา gsSettled ใน content.js ไม่เจอ")
+FUNCS.append(m.group(0))
 for name in ("findInputEl", "forceSend"):
     m = re.search(r"^function %s\(.*?^\}" % name, SRC, re.S | re.M)
     if not m:
@@ -55,41 +59,44 @@ function addGetStarted() {
   document.getElementById('stage').appendChild(b);
 }
 
+// เปิดหน้าใหม่ = เริ่มนับปุ่มใหม่ (gsSettled อยู่ระดับ module จริง ๆ ค้างข้ามการส่ง)
+function freshPage(html) {
+  gsSettled = false;
+  order.length = 0;
+  document.getElementById('stage').innerHTML = html || '';
+}
+
 async function run() {
   const out = {};
   const stage = document.getElementById('stage');
 
   // เคส 1: กล่องพิมพ์มีตั้งแต่แรก ปุ่มเพิ่งโผล่ตอน 100 ms ต้องกดปุ่มก่อนพิมพ์
-  stage.innerHTML = COMPOSER;
-  order.length = 0;
+  freshPage(COMPOSER);
   setTimeout(addGetStarted, 100);
   let t0 = performance.now();
-  await forceSend('hi', 'messenger', false, true);
+  await forceSend('hi', 'messenger', false);
   out.late_button = { order: order.slice(), ms: Math.round(performance.now() - t0) };
 
   // เคส 2: หน้าโหลดช้า กล่องพิมพ์เพิ่งมา 500 ms ปุ่มตาม 600 ms
   // (เคสนี้พังถ้าไปใช้ retryCount ร่วมกับลูปหากล่อง เพราะโควตาถูกใช้หมดก่อน)
-  stage.innerHTML = '';
-  order.length = 0;
+  freshPage('');
   setTimeout(() => { stage.innerHTML = COMPOSER; }, 500);
   setTimeout(addGetStarted, 600);
   t0 = performance.now();
-  await forceSend('hi', 'messenger', false, true);
+  await forceSend('hi', 'messenger', false);
   out.slow_page = { order: order.slice(), ms: Math.round(performance.now() - t0) };
 
-  // เคส 3: ลิงก์เพจ แต่ไม่มีปุ่มเลย ต้องพิมพ์ได้ ไม่ค้าง
-  stage.innerHTML = COMPOSER;
-  order.length = 0;
+  // เคส 3: ไม่มีปุ่มเลย ต้องพิมพ์ได้ ไม่ค้าง
+  freshPage(COMPOSER);
   t0 = performance.now();
-  await forceSend('hi', 'messenger', false, true);
-  out.page_no_button = { order: order.slice(), ms: Math.round(performance.now() - t0) };
+  await forceSend('hi', 'messenger', false);
+  out.no_button = { order: order.slice(), ms: Math.round(performance.now() - t0) };
 
-  // เคส 4: แชทคนธรรมดา (ไม่ใช่ลิงก์เพจ) ต้องไม่เสียเวลารอปุ่มเลย
-  stage.innerHTML = COMPOSER;
-  order.length = 0;
+  // เคส 4: ส่งซ้ำในหน้าเดิมที่รู้แล้วว่าไม่มีปุ่ม ต้องไม่รอซ้ำ (ส่ง 1000 ครั้งจะได้ไม่ช้า)
+  order.length = 0;   // ไม่ freshPage เพราะจงใจให้ gsSettled ค้างจากเคส 3
   t0 = performance.now();
-  await forceSend('hi', 'messenger', false, false);
-  out.normal_chat = { order: order.slice(), ms: Math.round(performance.now() - t0) };
+  await forceSend('hi', 'messenger', false);
+  out.repeat_send = { order: order.slice(), ms: Math.round(performance.now() - t0) };
 
   fetch('http://127.0.0.1:PORT_/result', {method:'POST', body: JSON.stringify(out)});
 }
@@ -144,18 +151,19 @@ def main():
     res = RESULTS[0]
     print(json.dumps(res, ensure_ascii=False, indent=1))
 
+    # เคส 1-2 ไม่ได้บอกว่าเป็นลิงก์เพจเลย ต้องกดปุ่มให้เอง (ลูกค้าลืมติ๊กช่องก็ต้องทำงาน)
     for case in ("late_button", "slow_page"):
         if res[case]["order"] != ["click:gs", "type:composer"]:
             sys.exit("FAIL: %s ไม่ได้กดปุ่มก่อนพิมพ์ -> %s" % (case, res[case]["order"]))
-    for case in ("page_no_button", "normal_chat"):
+    for case in ("no_button", "repeat_send"):
         if res[case]["order"] != ["type:composer"]:
             sys.exit("FAIL: %s พิมพ์ไม่ได้ -> %s" % (case, res[case]["order"]))
-    if res["page_no_button"]["ms"] > 1500:
-        sys.exit("FAIL: ลิงก์เพจไม่มีปุ่ม แต่รอนานเกินไป %d ms" % res["page_no_button"]["ms"])
-    if res["normal_chat"]["ms"] > 100:
-        sys.exit("FAIL: แชทคนธรรมดาเสียเวลารอปุ่ม %d ms" % res["normal_chat"]["ms"])
-    print("OK: กดปุ่มเริ่มต้นใช้งานก่อนพิมพ์เสมอ ไม่ค้างเมื่อไม่มีปุ่ม "
-          "และแชทคนธรรมดาไม่เสียเวลารอ")
+    if res["no_button"]["ms"] > 1500:
+        sys.exit("FAIL: ไม่มีปุ่ม แต่รอนานเกินไป %d ms" % res["no_button"]["ms"])
+    if res["repeat_send"]["ms"] > 100:
+        sys.exit("FAIL: ส่งซ้ำยังเสียเวลารอปุ่มอีก %d ms" % res["repeat_send"]["ms"])
+    print("OK: กดปุ่มเริ่มต้นใช้งานก่อนพิมพ์เสมอ (ไม่ต้องพึ่งการติ๊กช่องลิงก์เพจ) "
+          "ไม่ค้างเมื่อไม่มีปุ่ม และส่งซ้ำไม่เสียเวลารอ")
 
 
 if __name__ == "__main__":
