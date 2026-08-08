@@ -59,6 +59,18 @@ function addGetStarted() {
   document.getElementById('stage').appendChild(b);
 }
 
+// แบบที่ Facebook ใช้จริงบ่อยกว่า: span[role=button] ข้อความซ้อนใน span ลูก + มี NBSP
+function addGetStartedSpan() {
+  const b = document.createElement('span');
+  b.setAttribute('role', 'button');
+  b.setAttribute('aria-label', 'เริ่มต้นใช้งาน');
+  b.id = 'gs';
+  b.style.cssText = 'display:inline-block;width:120px;height:30px';
+  b.innerHTML = '<span dir="auto">\\u00a0เริ่มต้นใช้งาน </span>';
+  b.addEventListener('click', () => order.push('click:gs'));
+  document.getElementById('stage').appendChild(b);
+}
+
 // เปิดหน้าใหม่ = เริ่มนับปุ่มใหม่ (gsSettled อยู่ระดับ module จริง ๆ ค้างข้ามการส่ง)
 function freshPage(html) {
   gsSettled = false;
@@ -86,13 +98,20 @@ async function run() {
   await forceSend('hi', 'messenger', false);
   out.slow_page = { order: order.slice(), ms: Math.round(performance.now() - t0) };
 
-  // เคส 3: ไม่มีปุ่มเลย ต้องพิมพ์ได้ ไม่ค้าง
+  // เคส 3: ปุ่มเป็น span[role=button] ข้อความซ้อนใน span ลูก + NBSP (แบบที่ Facebook ใช้จริง)
+  freshPage(COMPOSER);
+  setTimeout(addGetStartedSpan, 100);
+  t0 = performance.now();
+  await forceSend('hi', 'messenger', false);
+  out.span_button = { order: order.slice(), ms: Math.round(performance.now() - t0) };
+
+  // เคส 4: ไม่มีปุ่มเลย ต้องพิมพ์ได้ ไม่ค้าง
   freshPage(COMPOSER);
   t0 = performance.now();
   await forceSend('hi', 'messenger', false);
   out.no_button = { order: order.slice(), ms: Math.round(performance.now() - t0) };
 
-  // เคส 4: ส่งซ้ำในหน้าเดิมที่รู้แล้วว่าไม่มีปุ่ม ต้องไม่รอซ้ำ (ส่ง 1000 ครั้งจะได้ไม่ช้า)
+  // เคส 5: ส่งซ้ำในหน้าเดิมที่รู้แล้วว่าไม่มีปุ่ม ต้องไม่รอซ้ำ (ส่ง 1000 ครั้งจะได้ไม่ช้า)
   order.length = 0;   // ไม่ freshPage เพราะจงใจให้ gsSettled ค้างจากเคส 3
   t0 = performance.now();
   await forceSend('hi', 'messenger', false);
@@ -152,7 +171,7 @@ def main():
     print(json.dumps(res, ensure_ascii=False, indent=1))
 
     # เคส 1-2 ไม่ได้บอกว่าเป็นลิงก์เพจเลย ต้องกดปุ่มให้เอง (ลูกค้าลืมติ๊กช่องก็ต้องทำงาน)
-    for case in ("late_button", "slow_page"):
+    for case in ("late_button", "slow_page", "span_button"):
         if res[case]["order"] != ["click:gs", "type:composer"]:
             sys.exit("FAIL: %s ไม่ได้กดปุ่มก่อนพิมพ์ -> %s" % (case, res[case]["order"]))
     for case in ("no_button", "repeat_send"):

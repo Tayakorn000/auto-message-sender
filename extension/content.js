@@ -466,12 +466,19 @@ function forceSend(text, mode, isPhotoTarget = false) {
         function tryFindInput() {
             // สแกนหาปุ่ม "เริ่มต้นใช้งาน"
             if (!getStartedClicked && (mode === "messenger" || mode === "all")) {
-                let getStartedBtns = Array.from(document.querySelectorAll('div[role="button"]')).filter(btn => {
-                    let btnText = (btn.innerText || "").toLowerCase().trim();
-                    return btnText === "เริ่มต้นใช้งาน" || btnText === "get started";
-                });
-                
-                if (getStartedBtns.length > 0 && getStartedBtns[0].offsetWidth > 0) {
+                // ponytail: ปุ่มไม่ได้เป็น div เสมอ และข้อความมักซ้อนอยู่ใน span ลูก
+                // เทียบ aria-label ด้วย + ล้าง NBSP/ช่องว่างซ้อน ไม่งั้น === พลาดง่าย
+                // (ตัวเดิมดูแค่ div[role=button] + innerText ตรงเป๊ะ = เงื่อนไขแคบกว่าโค้ดไลค์/แชร์ในไฟล์เดียวกัน)
+                const norm = s => (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").toLowerCase().trim();
+                const GS_LABELS = ["เริ่มต้นใช้งาน", "get started"];
+                let getStartedBtns = Array.from(document.querySelectorAll(
+                        'div[role="button"], span[role="button"], a[role="button"], button'
+                    ))
+                    .filter(btn => GS_LABELS.includes(norm(btn.innerText)) ||
+                                   GS_LABELS.includes(norm(btn.getAttribute("aria-label"))))
+                    .filter(btn => btn.offsetWidth > 0 && btn.offsetHeight > 0);
+
+                if (getStartedBtns.length > 0) {
                     getStartedBtns[0].click();
                     getStartedClicked = true;
                     gsSettled = true;
