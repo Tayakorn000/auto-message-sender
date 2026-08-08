@@ -9,6 +9,7 @@
 รัน: python3 test_update.py
 """
 import http.server
+import io
 import json
 import os
 import socketserver
@@ -16,13 +17,22 @@ import sys
 import tempfile
 import threading
 import types
+import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ.setdefault("AUTOSENDER_NO_UPDATE_CHECK", "1")
 import main  # noqa: E402
 
 PORT = 8786
-STATE = {"release": {}, "exe": b"x" * 2_000_000}
+STATE = {"release": {}, "exe": b"x" * 2_000_000, "zip": b""}
+
+
+def make_zip(files):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return buf.getvalue()
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -35,6 +45,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
             return
+        elif self.path.endswith(".zip"):
+            body = STATE["zip"]
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
         else:
             body = STATE["exe"]
             self.send_response(200)
@@ -75,7 +89,18 @@ EXE = [{"name": "Auto_message.V1.7.0.exe", "browser_download_url": GH + "/V1.7.0
 
 release("V1.7.0", EXE)
 got = main.check_update()
-check(got == ("V1.7.0", GH + "/V1.7.0/a.exe"), "เวอร์ชันใหม่กว่าต้องเจอ ได้ %r" % (got,))
+check(got == ("V1.7.0", GH + "/V1.7.0/a.exe", None),
+      "เวอร์ชันใหม่กว่าต้องเจอ ได้ %r" % (got,))
+
+# มี extension.zip แนบมาด้วย ต้องคืน URL ของมันมาด้วย
+release("V1.7.0", EXE + [{"name": "extension.zip",
+                         "browser_download_url": GH + "/V1.7.0/extension.zip"}])
+got = main.check_update()
+check(got == ("V1.7.0", GH + "/V1.7.0/a.exe", GH + "/V1.7.0/extension.zip"),
+      "ต้องคืน URL ของ extension.zip ด้วย ได้ %r" % (got,))
+release("V1.7.0", EXE + [{"name": "extension.zip",
+                         "browser_download_url": "https://evil.example.com/extension.zip"}])
+check(main.check_update()[2] is None, "extension.zip นอก github.com ต้องไม่รับ")
 
 release("V1.6.0", EXE)
 check(main.check_update() is None, "เวอร์ชันเท่ากันต้องไม่เตือน")
@@ -139,6 +164,61 @@ try:
 except RuntimeError as e:
     check("exe" in str(e), "ข้อความควรบอกว่าใช้ได้กับ .exe เท่านั้น")
 
+# --- อัปเดตส่วนขยาย (โฟลเดอร์เดียว ทุกโปรไฟล์ได้หมด) ---
+ext_dir = os.path.join(tmp, "extension")
+os.makedirs(ext_dir)
+open(os.path.join(ext_dir, "manifest.json"), "w").write('{"version":"1.0"}')
+open(os.path.join(ext_dir, "content.js"), "w").write("old")
+
+STATE["zip"] = make_zip({"manifest.json": '{"version":"1.7.0"}', "content.js": "new",
+                         "popup/popup.js": "p"})
+n = main.update_extension(BASE + "/extension.zip", ext_dir)
+check(n == 3, "ต้องเขียน 3 ไฟล์ ได้ %r" % n)
+check(open(os.path.join(ext_dir, "content.js")).read() == "new", "ต้องทับไฟล์เดิม")
+check('"1.7.0"' in open(os.path.join(ext_dir, "manifest.json")).read(), "manifest ต้องเป็นตัวใหม่")
+check(os.path.isfile(os.path.join(ext_dir, "popup", "popup.js")), "ต้องสร้างโฟลเดอร์ย่อยให้ด้วย")
+
+# ซิปที่ห่อไว้ในโฟลเดอร์ชั้นเดียว ต้องปอกออก ไม่ใช่ลง extension/extension/
+STATE["zip"] = make_zip({"extension/manifest.json": '{"version":"1.8.0"}',
+                         "extension/content.js": "wrapped"})
+main.update_extension(BASE + "/extension.zip", ext_dir)
+check(open(os.path.join(ext_dir, "content.js")).read() == "wrapped", "ซิปที่ห่อโฟลเดอร์ต้องถูกปอก")
+check(not os.path.exists(os.path.join(ext_dir, "extension")), "ต้องไม่เกิดโฟลเดอร์ซ้อน")
+
+# ซิปที่พยายามเขียนไฟล์นอกโฟลเดอร์ต้องไม่ผ่าน
+outside = os.path.join(tmp, "pwned.txt")
+STATE["zip"] = make_zip({"manifest.json": "{}", "../pwned.txt": "bad"})
+try:
+    main.update_extension(BASE + "/extension.zip", ext_dir)
+    sys.exit("FAIL: ซิปที่มี ../ ต้อง raise")
+except RuntimeError:
+    pass
+check(not os.path.exists(outside), "ห้ามเขียนไฟล์นอกโฟลเดอร์ส่วนขยาย")
+
+# ซิปที่ไม่ใช่ส่วนขยาย (ไม่มี manifest.json) ต้องไม่ผ่าน
+STATE["zip"] = make_zip({"readme.txt": "hello"})
+try:
+    main.update_extension(BASE + "/extension.zip", ext_dir)
+    sys.exit("FAIL: ซิปที่ไม่มี manifest.json ต้อง raise")
+except RuntimeError:
+    pass
+check(not os.path.exists(os.path.join(ext_dir, "readme.txt")), "ต้องไม่เขียนอะไรเลยเมื่อซิปผิด")
+
+# โฟลเดอร์ที่ไม่ใช่ส่วนขยาย ต้องไม่ยอมทับ
+try:
+    main.update_extension(BASE + "/extension.zip", tmp)
+    sys.exit("FAIL: โฟลเดอร์ที่ไม่มี manifest.json ต้อง raise")
+except RuntimeError:
+    pass
+
+# หาโฟลเดอร์ส่วนขยาย: ค่าที่จำไว้ใช้ได้ / ชี้ไปที่ที่ไม่ใช่ต้องตกไป
+main.CONFIG_PATH = os.path.join(tmp, "cfg.json")
+main.save_ext_dir(ext_dir)
+check(main.find_ext_dir() == ext_dir, "ต้องอ่าน path ที่จำไว้")
+main.save_ext_dir(os.path.join(tmp, "ไม่มีอยู่"))
+check(main.find_ext_dir() is None or main.find_ext_dir() != os.path.join(tmp, "ไม่มีอยู่"),
+      "path ที่ไม่มี manifest.json ต้องไม่ถูกใช้")
+
 # --- ส่วนขยายบอกเวอร์ชันมาทาง /api/get-task ---
 main.app.config.update(TESTING=True)
 client = main.app.test_client()
@@ -146,15 +226,17 @@ client.get("/api/get-task/profile_1/uid_a?v=1.6.0")
 client.get("/api/get-task/profile_1/uid_b?v=1.0")
 check(main.ext_versions == {"uid_a": "1.6.0", "uid_b": "1.0"},
       "ต้องเก็บเวอร์ชันส่วนขยายรายโปรไฟล์ ได้ %r" % main.ext_versions)
+client.get("/api/get-task/profile_2/uid_b?v=1.0")  # โปรไฟล์นี้ย้าย preset
 
 tab = main.tab_chrome
 tab.refresh_ext_status()
 txt = tab.lbl_ext.cget("text")
-check("1.0" in txt and "Reload" in txt, "ต้องเตือนโปรไฟล์ที่ใช้ส่วนขยายเก่า ได้ %r" % txt)
+check("1.0" in txt, "ต้องเตือนโปรไฟล์ที่ใช้ส่วนขยายเก่า ได้ %r" % txt)
+check("profile_2" in txt, "ต้องบอกด้วยว่าโปรไฟล์ไหน ได้ %r" % txt)
 
 main.ext_versions.pop("uid_b")
 tab.refresh_ext_status()
 check("✅" in tab.lbl_ext.cget("text"), "ทุกโปรไฟล์ล่าสุดแล้วต้องไม่เตือน")
 
 srv.shutdown()
-print("OK: เช็คเวอร์ชัน โหลดไฟล์ สคริปต์สลับไฟล์ และเตือนส่วนขยายเก่า ทำงานถูก")
+print("OK: เช็คเวอร์ชัน โหลดไฟล์ สคริปต์สลับไฟล์ อัปเดตส่วนขยาย และเตือนโปรไฟล์ที่ตกรุ่น ทำงานถูก")

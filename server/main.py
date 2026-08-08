@@ -7,6 +7,8 @@ import os
 import re
 import sys
 import json
+import io
+import zipfile
 import urllib.request
 from flask import Flask, jsonify, request
 from flask_cors import CORS
@@ -14,7 +16,7 @@ from flask_cors import CORS
 # ==========================================
 # 0. อัปเดตอัตโนมัติ (ดูเวอร์ชันจาก GitHub Release)
 # ==========================================
-APP_VERSION = "1.6.1"
+APP_VERSION = "1.6.2"
 UPDATE_REPO = "Tayakorn000/auto-message-sender"
 UPDATE_API = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -26,7 +28,9 @@ def parse_version(s):
 
 
 def check_update(timeout=10):
-    """คืน (tag, url) เมื่อมีเวอร์ชันใหม่กว่า / None เมื่อไม่มีหรือเช็คไม่ได้
+    """คืน (tag, url_exe, url_extension_zip) เมื่อมีเวอร์ชันใหม่กว่า / None เมื่อไม่มีหรือเช็คไม่ได้
+
+    url_extension_zip เป็น None ได้ ถ้า release นั้นไม่ได้แนบ extension.zip มา
 
     ponytail: ดูแต่ tag ไม่โหลดไฟล์ = 1 request เล็ก ๆ ไม่กินเน็ต
     """
@@ -40,12 +44,87 @@ def check_update(timeout=10):
     tag = data.get("tag_name", "")
     if parse_version(tag) <= parse_version(APP_VERSION):
         return None
+    exe_url = ext_url = None
     for a in data.get("assets", []):
         url = a.get("browser_download_url", "")
+        name = a.get("name", "").lower()
         # ยึดโดเมน github.com เท่านั้น กัน URL แปลกปลอมใน release
-        if a.get("name", "").lower().endswith(".exe") and url.startswith("https://github.com/"):
-            return tag, url
-    return None
+        if not url.startswith("https://github.com/"):
+            continue
+        if name.endswith(".exe") and not exe_url:
+            exe_url = url
+        elif name == "extension.zip":
+            ext_url = url
+    return (tag, exe_url, ext_url) if exe_url else None
+
+
+def base_dir():
+    return os.path.dirname(os.path.abspath(
+        sys.executable if getattr(sys, "frozen", False) else __file__))
+
+
+CONFIG_PATH = os.path.join(base_dir(), "autosender_config.json")
+
+
+def find_ext_dir():
+    """โฟลเดอร์ส่วนขยายที่ Chrome โหลดอยู่ (Load unpacked)
+
+    ponytail: ทุกโปรไฟล์ที่ Load unpacked จากโฟลเดอร์เดียวกัน = ไฟล์ชุดเดียวกันบนดิสก์
+    ทับทีเดียวได้ทุกโปรไฟล์ ไม่ต้องไล่ทีละอัน (โปรไฟล์ที่ชี้คนละโฟลเดอร์จะโผล่ในคำเตือน
+    เพราะส่วนขยายรายงานเวอร์ชันตัวเองมาทุกครั้งที่ถามงาน)
+    """
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            d = json.load(f).get("ext_dir")
+        if d and os.path.isfile(os.path.join(d, "manifest.json")):
+            return d
+    except Exception:
+        pass
+    d = os.path.join(base_dir(), "extension")
+    return d if os.path.isfile(os.path.join(d, "manifest.json")) else None
+
+
+def save_ext_dir(d):
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump({"ext_dir": d}, f)
+
+
+def update_extension(url, ext_dir, timeout=60):
+    """โหลด extension.zip มาทับโฟลเดอร์ส่วนขยาย คืนจำนวนไฟล์ที่เขียน
+
+    Chrome อ่านไฟล์ unpacked ใหม่ทุกครั้งที่เปิดโปรแกรม เลยไม่ต้องกด Reload เอง
+    ขอแค่ปิด Chrome ให้หมดก่อน (ขั้นตอน "เปิด Chrome Profiles" ก็ต้องปิดอยู่แล้ว)
+    """
+    root = os.path.abspath(ext_dir)
+    if not os.path.isfile(os.path.join(root, "manifest.json")):
+        raise RuntimeError("ไม่พบ manifest.json ในโฟลเดอร์ส่วนขยาย")
+
+    req = urllib.request.Request(url, headers={"User-Agent": "AutoSender"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        blob = r.read()
+
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        entries = [n for n in z.namelist() if not n.endswith("/")]
+        if not entries:
+            raise RuntimeError("ซิปว่าง")
+        # ซิปที่ห่อไว้ในโฟลเดอร์ชั้นเดียว (extension/...) ให้ปอกออกก่อน ไม่งั้นไฟล์ลงผิดที่
+        tops = {n.split("/")[0] for n in entries}
+        strip = len(tops) == 1 and not any("/" not in n for n in entries)
+        plan = []
+        for n in entries:
+            rel = n.split("/", 1)[1] if strip else n
+            # กันซิปที่ใส่ ../ หรือ path เต็ม มาเขียนไฟล์นอกโฟลเดอร์ส่วนขยาย
+            p = os.path.normpath(os.path.join(root, rel))
+            if p != root and not p.startswith(root + os.sep):
+                raise RuntimeError("ไฟล์ในซิปมี path ผิดปกติ: %s" % n)
+            plan.append((n, p))
+        if not any(os.path.basename(p) == "manifest.json" for _, p in plan):
+            raise RuntimeError("ซิปไม่มี manifest.json ไม่ใช่ไฟล์ส่วนขยาย")
+        for n, p in plan:
+            os.makedirs(os.path.dirname(p), exist_ok=True)
+            with open(p, "wb") as f:
+                f.write(z.read(n))
+    return len(plan)
 
 
 def download_and_restart(url, on_progress=None):
@@ -113,6 +192,7 @@ presets_data = {
 profiles_completed = {}
 ui_command_queue = []
 ext_versions = {}  # uid ของแต่ละโปรไฟล์ Chrome -> เวอร์ชันส่วนขยายที่รันอยู่
+ext_profiles = {}  # uid -> preset ที่โปรไฟล์นั้นเลือกไว้ (เอาไว้บอกว่าโปรไฟล์ไหนตกรุ่น)
 
 # หน้าต่างที่ถูกบัง/ไม่ได้อยู่หน้าสุด Chrome จะหน่วง timer เหลือ 1 ครั้ง/วินาที
 # ทำให้บอทค้างจนกว่าคนจะไปคลิกจอนั้นเอง แฟล็กชุดนี้ปิดการหน่วงทั้งหมด
@@ -136,6 +216,7 @@ def get_task(preset_group, unique_id):
     v = request.args.get("v")
     if v:
         ext_versions[unique_id] = v
+        ext_profiles[unique_id] = preset_group
 
     task = presets_data.get(preset_group)
     if not task or not task["is_system_on"] or task["current_task_id"] == 0:
@@ -298,13 +379,19 @@ class SetupChromeTab:
             threading.Thread(target=self._check_update_thread, daemon=True).start()
 
     def refresh_ext_status(self):
-        """เตือนเมื่อมีโปรไฟล์ที่ยังใช้ส่วนขยายเวอร์ชันเก่า (ลืมกด Reload)"""
-        old = sorted({v for v in ext_versions.values()
+        """เตือนเมื่อมีโปรไฟล์ที่ยังใช้ส่วนขยายเวอร์ชันเก่า (ลืมกด Reload)
+
+        บอกชื่อ preset ของโปรไฟล์นั้นด้วย — โปรไฟล์ที่ Load unpacked จากคนละโฟลเดอร์
+        จะไม่ถูกอัปเดตพร้อมโฟลเดอร์หลัก ต้องเห็นว่าเป็นตัวไหน
+        """
+        old = sorted({"%s: %s" % (ext_profiles.get(uid, "?"), v)
+                      for uid, v in ext_versions.items()
                       if parse_version(v) < parse_version(APP_VERSION)})
         if old:
             self.lbl_ext.config(
-                text="⚠️ มีโปรไฟล์ที่ยังใช้ส่วนขยายเวอร์ชันเก่า (%s)\n"
-                     "ไปที่ chrome://extensions ของโปรไฟล์นั้นแล้วกด Reload" % ", ".join(old))
+                text="⚠️ โปรไฟล์ที่ยังใช้ส่วนขยายเวอร์ชันเก่า (%s)\n"
+                     "ปิด Chrome ให้หมดแล้วเปิดใหม่ ถ้ายังเตือนอยู่แปลว่าโปรไฟล์นั้น "
+                     "Load unpacked มาจากคนละโฟลเดอร์" % ", ".join(old))
         elif ext_versions:
             self.lbl_ext.config(text="✅ ส่วนขยายทุกโปรไฟล์เป็นเวอร์ชันล่าสุด", fg="#198754")
         else:
@@ -322,8 +409,8 @@ class SetupChromeTab:
                 self.lbl_update.config(text="✅ ใช้เวอร์ชันล่าสุดอยู่แล้ว", fg="#198754")
                 self.btn_update.pack_forget()
                 return
-            tag, url = found
-            self.new_release = (tag, url)
+            tag, url, ext_url = found
+            self.new_release = (tag, url, ext_url)
             self.lbl_update.config(text=f"🎉 มีเวอร์ชันใหม่: {tag}", fg="#dc3545")
             self.btn_update.pack(fill="x")
         self._ui(show)
@@ -331,13 +418,33 @@ class SetupChromeTab:
     def action_update(self):
         if not self.new_release:
             return
-        tag, url = self.new_release
+        tag, url, ext_url = self.new_release
         self.btn_update.config(state="disabled")
 
         def worker():
             def prog(got, total):
                 pct = f"{got * 100 // total}%" if total else f"{got // 1048576} MB"
                 self._ui(lambda: self.lbl_update.config(text=f"⏳ กำลังโหลด {tag} ... {pct}", fg="#ffc107"))
+
+            # ส่วนขยายก่อน เพราะขั้นถัดไปโปรแกรมจะปิดตัวเองเพื่อสลับ .exe
+            # พลาดตรงนี้ไม่ล้มทั้งงาน แค่ต้องเอาโฟลเดอร์ไปวางเองเหมือนเดิม
+            if ext_url:
+                ext_dir = find_ext_dir()
+                if not ext_dir:
+                    self._ui(lambda: self.lbl_ext.config(
+                        text="⚠️ หาโฟลเดอร์ส่วนขยายไม่เจอ (ต้องอยู่ข้าง ๆ โปรแกรมชื่อ extension)\n"
+                             "ส่วนขยายจะไม่ถูกอัปเดตให้ ต้องวางเอง", fg="#dc3545"))
+                else:
+                    self._ui(lambda: self.lbl_update.config(text="⏳ กำลังอัปเดตส่วนขยาย...", fg="#ffc107"))
+                    try:
+                        n = update_extension(ext_url, ext_dir)
+                        self._ui(lambda: self.lbl_ext.config(
+                            text="✅ อัปเดตส่วนขยายแล้ว %d ไฟล์ — ปิด Chrome ให้หมดแล้วเปิดใหม่ "
+                                 "ทุกโปรไฟล์จะได้ตัวใหม่เอง (ไม่ต้องกด Reload)" % n, fg="#198754"))
+                    except Exception as e:
+                        m = str(e)
+                        self._ui(lambda: self.lbl_ext.config(
+                            text="⚠️ อัปเดตส่วนขยายไม่สำเร็จ: %s" % m, fg="#dc3545"))
             try:
                 download_and_restart(url, prog)
             except Exception as e:
