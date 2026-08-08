@@ -185,6 +185,25 @@ main.update_extension(BASE + "/extension.zip", ext_dir)
 check(open(os.path.join(ext_dir, "content.js")).read() == "wrapped", "ซิปที่ห่อโฟลเดอร์ต้องถูกปอก")
 check(not os.path.exists(os.path.join(ext_dir, "extension")), "ต้องไม่เกิดโฟลเดอร์ซ้อน")
 
+# ทุกไฟล์อยู่ใต้โฟลเดอร์เดียวแต่ปอกแล้วไม่เจอ manifest ที่ราก ต้องไม่ปอก (แล้วตกที่เช็ค manifest)
+STATE["zip"] = make_zip({"popup/a.js": "x", "popup/b.js": "y"})
+try:
+    main.update_extension(BASE + "/extension.zip", ext_dir)
+    sys.exit("FAIL: ซิปที่ไม่มี manifest.json ที่รากต้อง raise")
+except RuntimeError as e:
+    check("manifest" in str(e), "ควรบอกว่าไม่ใช่ไฟล์ส่วนขยาย ได้ %r" % str(e))
+
+# เช็คเวอร์ชันหลังแตกไฟล์: ซิปที่เวอร์ชันไม่ตรง tag ต้องไม่นับว่าสำเร็จ
+STATE["zip"] = make_zip({"manifest.json": '{"version":"1.6.1"}', "content.js": "z"})
+try:
+    main.update_extension(BASE + "/extension.zip", ext_dir, expect_version="V1.7.0")
+    sys.exit("FAIL: manifest เวอร์ชันไม่ตรง tag ต้อง raise")
+except RuntimeError as e:
+    check("1.6.1" in str(e), "ควรบอกว่าเวอร์ชันที่ได้คืออะไร ได้ %r" % str(e))
+STATE["zip"] = make_zip({"manifest.json": '{"version":"1.7.0"}', "content.js": "z"})
+check(main.update_extension(BASE + "/extension.zip", ext_dir, expect_version="V1.7.0") == 2,
+      "เวอร์ชันตรง tag ต้องผ่าน")
+
 # ซิปที่พยายามเขียนไฟล์นอกโฟลเดอร์ต้องไม่ผ่าน
 outside = os.path.join(tmp, "pwned.txt")
 STATE["zip"] = make_zip({"manifest.json": "{}", "../pwned.txt": "bad"})

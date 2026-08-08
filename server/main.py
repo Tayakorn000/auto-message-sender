@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import threading
 import time
 import subprocess
@@ -16,7 +16,7 @@ from flask_cors import CORS
 # ==========================================
 # 0. อัปเดตอัตโนมัติ (ดูเวอร์ชันจาก GitHub Release)
 # ==========================================
-APP_VERSION = "1.6.2"
+APP_VERSION = "1.6.3"
 UPDATE_REPO = "Tayakorn000/auto-message-sender"
 UPDATE_API = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -89,11 +89,12 @@ def save_ext_dir(d):
         json.dump({"ext_dir": d}, f)
 
 
-def update_extension(url, ext_dir, timeout=60):
+def update_extension(url, ext_dir, expect_version=None, timeout=60):
     """โหลด extension.zip มาทับโฟลเดอร์ส่วนขยาย คืนจำนวนไฟล์ที่เขียน
 
-    Chrome อ่านไฟล์ unpacked ใหม่ทุกครั้งที่เปิดโปรแกรม เลยไม่ต้องกด Reload เอง
-    ขอแค่ปิด Chrome ให้หมดก่อน (ขั้นตอน "เปิด Chrome Profiles" ก็ต้องปิดอยู่แล้ว)
+    ปิด Chrome ให้หมดแล้วเปิดใหม่ ทุกโปรไฟล์ที่ Load unpacked จากโฟลเดอร์นี้จะได้ไฟล์ชุดใหม่
+    (ขั้นตอน "เปิด Chrome Profiles" ก็ต้องปิด Chrome อยู่แล้ว)
+    ถ้าเปิดใหม่แล้วยังขึ้นเตือนว่าเวอร์ชันเก่า ให้กด Reload ที่ chrome://extensions ครั้งเดียว
     """
     root = os.path.abspath(ext_dir)
     if not os.path.isfile(os.path.join(root, "manifest.json")):
@@ -108,8 +109,11 @@ def update_extension(url, ext_dir, timeout=60):
         if not entries:
             raise RuntimeError("ซิปว่าง")
         # ซิปที่ห่อไว้ในโฟลเดอร์ชั้นเดียว (extension/...) ให้ปอกออกก่อน ไม่งั้นไฟล์ลงผิดที่
+        # ปอกเฉพาะตอนที่ปอกแล้วเจอ manifest.json ที่ราก ไม่งั้นเสี่ยงปอกผิด
+        # (เช่นซิปที่ทุกไฟล์บังเอิญอยู่ใต้ popup/ อันเดียว)
         tops = {n.split("/")[0] for n in entries}
-        strip = len(tops) == 1 and not any("/" not in n for n in entries)
+        strip = (len(tops) == 1 and all("/" in n for n in entries)
+                 and any(n.split("/", 1)[1] == "manifest.json" for n in entries))
         plan = []
         for n in entries:
             rel = n.split("/", 1)[1] if strip else n
@@ -124,6 +128,18 @@ def update_extension(url, ext_dir, timeout=60):
             os.makedirs(os.path.dirname(p), exist_ok=True)
             with open(p, "wb") as f:
                 f.write(z.read(n))
+
+    # อ่าน manifest กลับมาเช็คว่าเวอร์ชันเปลี่ยนจริง ไม่ใช่แค่เขียนไฟล์ผ่าน
+    # (ซิปที่โหลดมาไม่ครบก็ยังแตกได้บางไฟล์ แล้วขึ้นว่าสำเร็จทั้งที่ของเก่ายังอยู่)
+    if expect_version:
+        try:
+            with open(os.path.join(root, "manifest.json"), encoding="utf-8") as f:
+                got = json.load(f).get("version")
+        except Exception:
+            got = None
+        if parse_version(got) != parse_version(expect_version):
+            raise RuntimeError("อัปเดตแล้วแต่ manifest ยังเป็น %s (ควรเป็น %s)"
+                               % (got, expect_version))
     return len(plan)
 
 
@@ -421,6 +437,17 @@ class SetupChromeTab:
         tag, url, ext_url = self.new_release
         self.btn_update.config(state="disabled")
 
+        # หาโฟลเดอร์ส่วนขยายตอนนี้เลย ยังอยู่บนเธรดหลัก เปิดหน้าต่างเลือกโฟลเดอร์ได้
+        ext_dir = find_ext_dir() if ext_url else None
+        if ext_url and not ext_dir:
+            messagebox.showinfo("หาโฟลเดอร์ส่วนขยายไม่เจอ",
+                                "ไม่พบโฟลเดอร์ extension ข้าง ๆ โปรแกรม\n"
+                                "เลือกโฟลเดอร์ที่ Chrome โหลดส่วนขยายอยู่ (โฟลเดอร์ที่มี manifest.json)")
+            picked = filedialog.askdirectory(title="เลือกโฟลเดอร์ส่วนขยาย")
+            if picked and os.path.isfile(os.path.join(picked, "manifest.json")):
+                save_ext_dir(picked)   # จำไว้ ครั้งหน้าไม่ต้องถามอีก
+                ext_dir = picked
+
         def worker():
             def prog(got, total):
                 pct = f"{got * 100 // total}%" if total else f"{got // 1048576} MB"
@@ -428,23 +455,22 @@ class SetupChromeTab:
 
             # ส่วนขยายก่อน เพราะขั้นถัดไปโปรแกรมจะปิดตัวเองเพื่อสลับ .exe
             # พลาดตรงนี้ไม่ล้มทั้งงาน แค่ต้องเอาโฟลเดอร์ไปวางเองเหมือนเดิม
-            if ext_url:
-                ext_dir = find_ext_dir()
-                if not ext_dir:
+            if ext_url and not ext_dir:
+                self._ui(lambda: self.lbl_ext.config(
+                    text="⚠️ ไม่ได้เลือกโฟลเดอร์ส่วนขยาย จะอัปเดตให้แค่ตัวโปรแกรม\n"
+                         "ส่วนขยายต้องเอาไปวางทับเอง", fg="#dc3545"))
+            elif ext_url:
+                self._ui(lambda: self.lbl_update.config(text="⏳ กำลังอัปเดตส่วนขยาย...", fg="#ffc107"))
+                try:
+                    n = update_extension(ext_url, ext_dir, expect_version=tag)
                     self._ui(lambda: self.lbl_ext.config(
-                        text="⚠️ หาโฟลเดอร์ส่วนขยายไม่เจอ (ต้องอยู่ข้าง ๆ โปรแกรมชื่อ extension)\n"
-                             "ส่วนขยายจะไม่ถูกอัปเดตให้ ต้องวางเอง", fg="#dc3545"))
-                else:
-                    self._ui(lambda: self.lbl_update.config(text="⏳ กำลังอัปเดตส่วนขยาย...", fg="#ffc107"))
-                    try:
-                        n = update_extension(ext_url, ext_dir)
-                        self._ui(lambda: self.lbl_ext.config(
-                            text="✅ อัปเดตส่วนขยายแล้ว %d ไฟล์ — ปิด Chrome ให้หมดแล้วเปิดใหม่ "
-                                 "ทุกโปรไฟล์จะได้ตัวใหม่เอง (ไม่ต้องกด Reload)" % n, fg="#198754"))
-                    except Exception as e:
-                        m = str(e)
-                        self._ui(lambda: self.lbl_ext.config(
-                            text="⚠️ อัปเดตส่วนขยายไม่สำเร็จ: %s" % m, fg="#dc3545"))
+                        text="✅ อัปเดตส่วนขยายแล้ว %d ไฟล์ — ปิด Chrome ให้หมดแล้วเปิดใหม่\n"
+                             "ถ้ายังขึ้นเตือนว่าเวอร์ชันเก่า กด Reload ที่ chrome://extensions "
+                             "ครั้งเดียว" % n, fg="#198754"))
+                except Exception as e:
+                    m = str(e)
+                    self._ui(lambda: self.lbl_ext.config(
+                        text="⚠️ อัปเดตส่วนขยายไม่สำเร็จ: %s" % m, fg="#dc3545"))
             try:
                 download_and_restart(url, prog)
             except Exception as e:
