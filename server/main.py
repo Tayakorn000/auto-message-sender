@@ -16,7 +16,7 @@ from flask_cors import CORS
 # ==========================================
 # 0. อัปเดตอัตโนมัติ (ดูเวอร์ชันจาก GitHub Release)
 # ==========================================
-APP_VERSION = "1.6.4"
+APP_VERSION = "1.6.5"
 UPDATE_REPO = "Tayakorn000/auto-message-sender"
 UPDATE_API = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -385,6 +385,7 @@ class SetupChromeTab:
                                     command=self.action_update)
         self.new_release = None
 
+        self.ext_note = ""      # ข้อความค้างจากการอัปเดตส่วนขยายอัตโนมัติ (ตั้งจากอีกเธรด)
         self.lbl_ext = tk.Label(frame_up, text="", font=("Angsana New", 14), bg="#f4f6f9",
                                 fg="#dc3545", justify="left", wraplength=480)
         self.lbl_ext.pack(anchor="w", pady=(5, 0))
@@ -414,6 +415,8 @@ class SetupChromeTab:
                 text="⚠️ โปรไฟล์ที่ยังใช้ส่วนขยายเวอร์ชันเก่า (%s)\n"
                      "ปิด Chrome ให้หมดแล้วเปิดใหม่ ถ้ายังเตือนอยู่แปลว่าโปรไฟล์นั้น "
                      "Load unpacked มาจากคนละโฟลเดอร์" % ", ".join(old))
+        elif self.ext_note:
+            self.lbl_ext.config(text=self.ext_note, fg="#dc3545")
         elif ext_versions:
             self.lbl_ext.config(text="✅ ส่วนขยายทุกโปรไฟล์เป็นเวอร์ชันล่าสุด", fg="#198754")
         else:
@@ -424,8 +427,32 @@ class SetupChromeTab:
         """สั่งงาน widget จากเธรดอื่นไม่ได้ ต้องโยนกลับเข้าลูปหลักก่อน"""
         self.frame.after(0, fn)
 
+    def _auto_update_extension(self, tag, ext_url):
+        """ทับโฟลเดอร์ส่วนขยายให้เลยตอนเปิดโปรแกรม ไม่ต้องรอใครกด
+
+        ponytail: ส่วนขยายเป็นแค่ไฟล์บนดิสก์ ทับได้ทันที Chrome อ่านของใหม่ตอนเปิดครั้งหน้าเอง
+        ตัวโปรแกรมเองทำแบบนี้ไม่ได้ (Windows แทนที่ .exe ที่รันอยู่ไม่ได้) เลยยังต้องมีปุ่ม
+        หาโฟลเดอร์ไม่เจอก็เงียบไว้ ไม่เด้งถาม — ค่อยไปถามตอนกดปุ่มอัปเดต
+        """
+        d = find_ext_dir()
+        if not d:
+            return
+        try:
+            with open(os.path.join(d, "manifest.json"), encoding="utf-8") as f:
+                if parse_version(json.load(f).get("version")) >= parse_version(tag):
+                    return   # ทับไปแล้วรอบก่อน ไม่ต้องโหลดซ้ำ
+            update_extension(ext_url, d, expect_version=tag)
+        except Exception as e:
+            # แค่ตั้งตัวแปร ไม่แตะ widget เลย เธรดไหนตั้งก็ได้ refresh_ext_status เอาไปแสดงเอง
+            self.ext_note = "⚠️ อัปเดตส่วนขยายอัตโนมัติไม่สำเร็จ: %s" % e
+            return
+        # ไม่ต้องขึ้นข้อความบอก — refresh_ext_status จะเตือนเองว่า Chrome ยังใช้ตัวเก่าอยู่
+        self.ext_note = ""
+
     def _check_update_thread(self):
         found = check_update()
+        if found and found[2]:
+            self._auto_update_extension(found[0], found[2])
         def show():
             if not found:
                 self.lbl_update.config(text="✅ ใช้เวอร์ชันล่าสุดอยู่แล้ว", fg="#198754")

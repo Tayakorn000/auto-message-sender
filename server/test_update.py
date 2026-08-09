@@ -253,6 +253,32 @@ txt = tab.lbl_ext.cget("text")
 check("1.0" in txt, "ต้องเตือนโปรไฟล์ที่ใช้ส่วนขยายเก่า ได้ %r" % txt)
 check("profile_2" in txt, "ต้องบอกด้วยว่าโปรไฟล์ไหน ได้ %r" % txt)
 
+# --- ทับส่วนขยายให้เองตอนเปิดโปรแกรม ไม่ต้องกดปุ่ม ---
+main.save_ext_dir(ext_dir)
+open(os.path.join(ext_dir, "manifest.json"), "w").write('{"version":"1.0"}')
+open(os.path.join(ext_dir, "content.js"), "w").write("old")
+STATE["zip"] = make_zip({"manifest.json": '{"version":"1.7.0"}', "content.js": "auto"})
+tab._auto_update_extension("V1.7.0", BASE + "/extension.zip")
+check(open(os.path.join(ext_dir, "content.js")).read() == "auto",
+      "เปิดโปรแกรมแล้วต้องทับส่วนขยายให้เลย ไม่ต้องรอกดปุ่ม")
+check(tab.ext_note == "", "สำเร็จแล้วต้องไม่มีข้อความเตือนค้าง ได้ %r" % tab.ext_note)
+
+# ทับไปแล้วรอบก่อน ต้องไม่โหลดซ้ำ (ซิปพังก็ต้องไม่พัง เพราะไม่ควรแตะเลย)
+STATE["zip"] = "ไม่ใช่ซิป".encode()
+tab._auto_update_extension("V1.7.0", BASE + "/extension.zip")
+check(open(os.path.join(ext_dir, "content.js")).read() == "auto", "เวอร์ชันตรงแล้วต้องข้าม")
+
+# ซิปพังจริงตอนที่ต้องอัปเดต ต้องขึ้นเตือน ไม่ใช่เงียบ
+open(os.path.join(ext_dir, "manifest.json"), "w").write('{"version":"1.0"}')
+tab._auto_update_extension("V1.7.0", BASE + "/extension.zip")
+check("ไม่สำเร็จ" in tab.ext_note, "อัปเดตอัตโนมัติพังต้องเก็บข้อความเตือน ได้ %r" % tab.ext_note)
+saved, main.ext_versions = dict(main.ext_versions), {}   # ไม่มีโปรไฟล์เก่าบัง จะได้เห็นข้อความนี้
+tab.refresh_ext_status()
+check("ไม่สำเร็จ" in tab.lbl_ext.cget("text"),
+      "อัปเดตอัตโนมัติพังต้องขึ้นบนหน้าจอ ได้ %r" % tab.lbl_ext.cget("text"))
+main.ext_versions = saved
+tab.ext_note = ""
+
 # ส่วนขยายรุ่นก่อน 1.6.0 ไม่ส่ง v มาเลย ต้องยังจับได้ ไม่ใช่เงียบ
 client.get("/api/get-task/profile_3/uid_c")
 check(main.ext_versions.get("uid_c") == "0",
