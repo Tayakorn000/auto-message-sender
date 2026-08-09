@@ -16,7 +16,7 @@ from flask_cors import CORS
 # ==========================================
 # 0. อัปเดตอัตโนมัติ (ดูเวอร์ชันจาก GitHub Release)
 # ==========================================
-APP_VERSION = "1.6.3"
+APP_VERSION = "1.6.4"
 UPDATE_REPO = "Tayakorn000/auto-message-sender"
 UPDATE_API = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -229,10 +229,10 @@ CORS(app)
 @app.route('/api/get-task/<preset_group>/<unique_id>')
 def get_task(preset_group, unique_id):
     # ส่วนขยายบอกเวอร์ชันตัวเองมาด้วย เอาไว้เตือนเมื่อลืมกด Reload หลังอัปเดต
-    v = request.args.get("v")
-    if v:
-        ext_versions[unique_id] = v
-        ext_profiles[unique_id] = preset_group
+    # ponytail: ตัวเก่ากว่า 1.6.0 ไม่ส่ง v มาเลย ต้องนับเป็นเก่าที่สุด ("0")
+    # ไม่งั้นเคสที่ต้องจับที่สุด (ไม่เคยเอาโฟลเดอร์ใหม่ไปวางเลย) จะเงียบสนิท ไม่ขึ้นเตือนอะไร
+    ext_versions[unique_id] = request.args.get("v") or "0"
+    ext_profiles[unique_id] = preset_group
 
     task = presets_data.get(preset_group)
     if not task or not task["is_system_on"] or task["current_task_id"] == 0:
@@ -400,9 +400,15 @@ class SetupChromeTab:
         บอกชื่อ preset ของโปรไฟล์นั้นด้วย — โปรไฟล์ที่ Load unpacked จากคนละโฟลเดอร์
         จะไม่ถูกอัปเดตพร้อมโฟลเดอร์หลัก ต้องเห็นว่าเป็นตัวไหน
         """
-        old = sorted({"%s: %s" % (ext_profiles.get(uid, "?"), v)
+        old = sorted({"%s: %s" % (ext_profiles.get(uid, "?"),
+                                  "เก่ามาก ไม่บอกเวอร์ชัน" if v == "0" else v)
                       for uid, v in ext_versions.items()
                       if parse_version(v) < parse_version(APP_VERSION)})
+        # เอาเวอร์ชันขึ้นหัวหน้าต่างด้วย ถ่ายรูปหน้าจอส่งมารูปเดียวก็รู้แล้วว่าตัวไหนตกรุ่น
+        seen = sorted({"เก่ามาก" if v == "0" else v for v in ext_versions.values()})
+        self.frame.winfo_toplevel().title(
+            "Auto Messenger v%s%s" % (APP_VERSION,
+                                      " | ส่วนขยาย " + ", ".join(seen) if seen else ""))
         if old:
             self.lbl_ext.config(
                 text="⚠️ โปรไฟล์ที่ยังใช้ส่วนขยายเวอร์ชันเก่า (%s)\n"

@@ -109,8 +109,11 @@ function clickPageMessageButton() {
 // 👍 กดไลค์ / 🔁 แชร์โพสต์ (ทางเดินเดียวกับส่งข้อความ)
 // ==========================================
 const isVisible = el => !!el && el.offsetWidth > 0 && el.offsetHeight > 0;
-const ariaOf = el => (el.getAttribute('aria-label') || "").toLowerCase().trim();
-const textOf = el => (el.innerText || "").toLowerCase().trim();
+// ponytail: Facebook แทรก NBSP คั่นคำแทนช่องว่างธรรมดา ("Share now", "Remove Like")
+// trim() ตัด NBSP หัวท้ายให้อยู่แล้ว แต่ตัวที่อยู่กลางคำต้องล้างเอง ไม่งั้น === / includes พลาด
+const norm = s => (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").toLowerCase().trim();
+const ariaOf = el => norm(el.getAttribute('aria-label'));
+const textOf = el => norm(el.innerText);
 
 // ponytail: รอแบบ poll ธรรมดา ไม่ใช้ MutationObserver เพราะ Facebook เปลี่ยน DOM รัวมาก
 // observer จะยิงถี่กว่าที่ต้องใช้ คืนค่าที่ fn คืนมา หรือ null เมื่อหมดเวลา
@@ -467,9 +470,8 @@ function forceSend(text, mode, isPhotoTarget = false) {
             // สแกนหาปุ่ม "เริ่มต้นใช้งาน"
             if (!getStartedClicked && (mode === "messenger" || mode === "all")) {
                 // ponytail: ปุ่มไม่ได้เป็น div เสมอ และข้อความมักซ้อนอยู่ใน span ลูก
-                // เทียบ aria-label ด้วย + ล้าง NBSP/ช่องว่างซ้อน ไม่งั้น === พลาดง่าย
+                // เทียบ aria-label ด้วย + ล้าง NBSP/ช่องว่างซ้อนด้วย norm ตัวเดียวกับที่ไลค์/แชร์ใช้
                 // (ตัวเดิมดูแค่ div[role=button] + innerText ตรงเป๊ะ = เงื่อนไขแคบกว่าโค้ดไลค์/แชร์ในไฟล์เดียวกัน)
-                const norm = s => (s || "").replace(/\u00a0/g, " ").replace(/\s+/g, " ").toLowerCase().trim();
                 const GS_LABELS = ["เริ่มต้นใช้งาน", "get started"];
                 let getStartedBtns = Array.from(document.querySelectorAll(
                         'div[role="button"], span[role="button"], a[role="button"], button'

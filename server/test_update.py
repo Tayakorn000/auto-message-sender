@@ -253,9 +253,22 @@ txt = tab.lbl_ext.cget("text")
 check("1.0" in txt, "ต้องเตือนโปรไฟล์ที่ใช้ส่วนขยายเก่า ได้ %r" % txt)
 check("profile_2" in txt, "ต้องบอกด้วยว่าโปรไฟล์ไหน ได้ %r" % txt)
 
+# ส่วนขยายรุ่นก่อน 1.6.0 ไม่ส่ง v มาเลย ต้องยังจับได้ ไม่ใช่เงียบ
+client.get("/api/get-task/profile_3/uid_c")
+check(main.ext_versions.get("uid_c") == "0",
+      "poll ที่ไม่มี v ต้องนับเป็นเวอร์ชันเก่าสุด ได้ %r" % main.ext_versions.get("uid_c"))
+tab.refresh_ext_status()
+txt = tab.lbl_ext.cget("text")
+check("profile_3" in txt and "เก่ามาก" in txt, "ต้องเตือนตัวที่ไม่บอกเวอร์ชัน ได้ %r" % txt)
+check("เก่ามาก" in tab.frame.winfo_toplevel().title(),
+      "หัวหน้าต่างต้องบอกเวอร์ชันส่วนขยายด้วย ได้ %r" % tab.frame.winfo_toplevel().title())
+
 main.ext_versions.pop("uid_b")
+main.ext_versions.pop("uid_c")
 tab.refresh_ext_status()
 check("✅" in tab.lbl_ext.cget("text"), "ทุกโปรไฟล์ล่าสุดแล้วต้องไม่เตือน")
+check("1.6.0" in tab.frame.winfo_toplevel().title(),
+      "หัวหน้าต่างต้องขึ้นเวอร์ชันส่วนขยายที่ล่าสุดแล้ว ได้ %r" % tab.frame.winfo_toplevel().title())
 
 srv.shutdown()
 print("OK: เช็คเวอร์ชัน โหลดไฟล์ สคริปต์สลับไฟล์ อัปเดตส่วนขยาย และเตือนโปรไฟล์ที่ตกรุ่น ทำงานถูก")

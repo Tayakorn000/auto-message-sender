@@ -25,7 +25,8 @@ SRC = open(os.path.join(HERE, "content.js"), encoding="utf-8").read()
 
 # ดึงของจริงมาเทส ไม่ก๊อปโค้ดมาวางซ้ำ
 PARTS = []
-for pat in (r"^const isVisible = .*?;$", r"^const ariaOf = .*?;$", r"^const textOf = .*?;$",
+for pat in (r"^const isVisible = .*?;$", r"^const norm = .*?;$",
+            r"^const ariaOf = .*?;$", r"^const textOf = .*?;$",
             r"^function waitFor\(.*?^\}", r"^function postScope\(.*?^\}",
             r"^function postButtons\(.*?^\}", r"^const LIKE_LABELS = .*?;$",
             r"^const UNLIKE_LABELS = .*?;$", r"^function findLikeBtn\(.*?^\}",
@@ -118,6 +119,18 @@ async function run() {
   out.share_missing = { ok: await clickShare(), clicked: clicked.slice(),
                         ms: Math.round(performance.now() - t0) };
 
+  // Facebook แทรก NBSP คั่นคำแทนช่องว่างธรรมดา (เจอมาแล้วกับปุ่ม "เริ่มต้นใช้งาน")
+  // ภาษาอังกฤษเจอชัดสุดเพราะป้ายมีเว้นวรรค — "Remove Like" ที่พลาดจะกลายเป็นกดไลค์ออก
+  stage(btn('Remove\\u00a0Like', 'Like', 'already_nbsp'));
+  out.like_already_nbsp = { ok: await clickLike(), clicked: clicked.slice() };
+
+  stage(btn('Share', 'Share', 'share_en'));
+  document.getElementById('share_en').addEventListener('click', () => {
+    document.getElementById('stage').appendChild(
+      btn('Share\\u00a0now', 'Share\\u00a0now', 'now_nbsp'));
+  });
+  out.share_nbsp = { ok: await clickShare(), clicked: clicked.slice() };
+
   // หน้าจริง: มีปุ่มถูกใจของ "เพจ" อยู่นอกโพสต์ + ปุ่มถูกใจของ "คอมเมนต์" อยู่ในโพสต์
   // ต้องกดของโพสต์อย่างเดียว
   const art = document.createElement('div');
@@ -184,6 +197,8 @@ EXPECT = {
     "share_now": (True, ["share", "share_now"]),
     "share_dialog": (True, ["share2", "to_feed", "post_btn"]),
     "share_missing": (False, []),
+    "like_already_nbsp": (True, []),           # NBSP ใน "Remove Like" ห้ามทำให้กดไลค์ออก
+    "share_nbsp": (True, ["share_en", "now_nbsp"]),
     "like_scoped": (True, ["post_like"]),      # ไม่ใช่ page_like / comment_like
     "share_scoped": (True, ["post_share", "scoped_now"]),
 }

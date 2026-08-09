@@ -22,10 +22,11 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 SRC = open(os.path.join(HERE, "content.js"), encoding="utf-8").read()
 FUNCS = []
-m = re.search(r"^let gsSettled = false;$", SRC, re.M)
-if not m:
-    sys.exit("FAIL: หา gsSettled ใน content.js ไม่เจอ")
-FUNCS.append(m.group(0))
+for pat in (r"^let gsSettled = false;$", r"^const norm = .*?;$"):
+    m = re.search(pat, SRC, re.M)
+    if not m:
+        sys.exit("FAIL: หาโค้ดใน content.js ไม่เจอ -> %s" % pat)
+    FUNCS.append(m.group(0))
 for name in ("findInputEl", "forceSend"):
     m = re.search(r"^function %s\(.*?^\}" % name, SRC, re.S | re.M)
     if not m:
