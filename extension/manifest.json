@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Auto Messenger",
-  "version": "1.6.5",
+  "version": "1.6.6",
   "permissions": [
     "storage",
     "tabs"
@@ -18,8 +18,13 @@
   },
   "content_scripts": [
     {
-      "matches": ["*://*.facebook.com/*", "*://*.messenger.com/*"],
-      "js": ["content.js"]
+      "matches": [
+        "*://*.facebook.com/*",
+        "*://*.messenger.com/*"
+      ],
+      "js": [
+        "content.js"
+      ]
     }
   ]
 }
