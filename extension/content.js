@@ -465,7 +465,22 @@ function findInputEl(mode, isPhotoTarget) {
 let gsSettled = false;
 
 // 🟢 แยกระหว่าง "กล่องคอมเมนต์" กับ "กล่องแชท" อย่างเด็ดขาด!
-const GS_LABELS = ["เริ่มต้นใช้งาน", "get started"];
+const GS_LABELS = ["เริ่มต้นใช้งาน", "get started", "เริ่มต้นการสนทนา", "เริ่มการสนทนา",
+                   "เริ่มแชท", "start chat", "เริ่มต้น", "เริ่มสนทนา"];
+
+// ponytail: เดิมเทียบชื่อปุ่มแบบ "ตรงเป๊ะ" ทำให้ป้ายที่มีคำอื่นพ่วง ("เริ่มต้นใช้งาน 👋") หลุดหมด
+// และ Facebook ห่อ span ที่มีข้อความไว้ใต้ตัวที่คลิกได้จริงบ้าง สลับกันบ้าง แล้วแต่หน้า
+// ใช้ includes + จำกัดความยาวป้าย (กันไปโดนย่อหน้ายาว ๆ ที่บังเอิญมีคำนี้)
+function findGsBtns() {
+    const hit = t => t && t.length <= 40 && GS_LABELS.some(g => t.includes(g));
+    const cands = Array.from(document.querySelectorAll(
+            'div[role="button"], span[role="button"], a[role="button"], button, ' +
+            'div[role="link"], a[role="link"]'))
+        .filter(isVisible)
+        .filter(b => hit(norm(b.innerText)) || hit(norm(b.getAttribute("aria-label"))));
+    // ปุ่มซ้อนกัน เอาตัวในสุด ไม่งั้นกดโดนกรอบนอกที่ไม่ใช่ปุ่มจริง
+    return cands.filter(b => !cands.some(o => o !== b && b.contains(o)));
+}
 
 // ponytail: "หาช่องพิมพ์ไม่เจอ" เฉย ๆ บอกอะไรไม่ได้เลย ต้องเดาต่อว่าหน้ายังโหลด/ต้องล็อกอิน/
 // หรือมีกล่องแต่คัดออกหมด — แนบสภาพหน้าจริงตอนยอมแพ้ไปด้วย จะได้จบในรอบเดียว
@@ -489,27 +504,21 @@ function forceSend(text, mode, isPhotoTarget = false) {
         // ponytail: 300 รอบ × 10 ms = รอแค่ 3 วิ ซึ่งสั้นกว่าเวลาที่หน้า Facebook โหลดเสร็จ
         // เปิดหลายโปรไฟล์พร้อมกันยิ่งช้า = ยอมแพ้ก่อนกล่องพิมพ์จะโผล่ (background ให้เวลา 30 วิ+ อยู่แล้ว)
         const maxRetries = 2000;
-        let getStartedClicked = false;
+        const gsClicked = new Set();   // กดปุ่มไหนไปแล้วบ้าง
         let gsWaits = 0; // ponytail: นับแยกจาก retryCount ไม่งั้นหน้าโหลดช้าจะข้ามการรอไปเลย
 
         function tryFindInput() {
-            // สแกนหาปุ่ม "เริ่มต้นใช้งาน"
-            if (!getStartedClicked && (mode === "messenger" || mode === "all")) {
-                // ponytail: ปุ่มไม่ได้เป็น div เสมอ และข้อความมักซ้อนอยู่ใน span ลูก
-                // เทียบ aria-label ด้วย + ล้าง NBSP/ช่องว่างซ้อนด้วย norm ตัวเดียวกับที่ไลค์/แชร์ใช้
-                // (ตัวเดิมดูแค่ div[role=button] + innerText ตรงเป๊ะ = เงื่อนไขแคบกว่าโค้ดไลค์/แชร์ในไฟล์เดียวกัน)
-                let getStartedBtns = Array.from(document.querySelectorAll(
-                        'div[role="button"], span[role="button"], a[role="button"], button'
-                    ))
-                    .filter(btn => GS_LABELS.includes(norm(btn.innerText)) ||
-                                   GS_LABELS.includes(norm(btn.getAttribute("aria-label"))))
-                    .filter(btn => btn.offsetWidth > 0 && btn.offsetHeight > 0);
-
-                if (getStartedBtns.length > 0) {
-                    getStartedBtns[0].click();
-                    getStartedClicked = true;
+            // สแกนหาปุ่ม "เริ่มต้นใช้งาน" — แชทที่ยังไม่เคยคุยกับเพจจะ "ไม่มีกล่องพิมพ์เลย"
+            // จนกว่าจะกดปุ่มนี้ ถ้ากดไม่โดน = หากล่องพิมพ์ยังไงก็ไม่เจอ
+            if (mode === "messenger" || mode === "all") {
+                // ponytail: เดิมกดได้ครั้งเดียวจบ กดพลาดปุ่มเดียว = จบเห่ทั้งงาน
+                // ตอนนี้ไล่กดตัวที่ยังไม่ได้กด ทีละอันจนกล่องพิมพ์โผล่ (กดซ้ำอันเดิมไม่มีประโยชน์)
+                const fresh = findGsBtns().filter(b => !gsClicked.has(b));
+                if (fresh.length > 0) {
+                    gsClicked.add(fresh[0]);
+                    fresh[0].click();
                     gsSettled = true;
-                    setTimeout(tryFindInput, 300); 
+                    setTimeout(tryFindInput, 300);
                     return;
                 }
             }
@@ -521,7 +530,7 @@ function forceSend(text, mode, isPhotoTarget = false) {
             // ไม่รอ = ปุ่มไม่ถูกกด แล้วพิมพ์ลงกล่องที่ยังใช้งานไม่ได้ ส่งไม่ออก
             // ไม่ผูกกับ is_page_link แล้ว — ลืมติ๊กช่อง "นี่คือลิงก์หน้าเพจ" ทีเดียวพังทั้งงาน
             // ยอมเสีย 500 ms ครั้งเดียวต่อหน้า (gsSettled) แลกกับไม่ต้องพึ่งคนติ๊กถูก
-            if (inputEl && !gsSettled && !getStartedClicked &&
+            if (inputEl && !gsSettled && gsClicked.size === 0 &&
                 (mode === "messenger" || mode === "all")) {
                 if (gsWaits < 50) {
                     gsWaits++;

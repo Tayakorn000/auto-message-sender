@@ -23,12 +23,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = open(os.path.join(HERE, "content.js"), encoding="utf-8").read()
 FUNCS = []
 for pat in (r"^let gsSettled = false;$", r"^const norm = .*?;$",
-            r"^const GS_LABELS = .*?;$"):
+            r"^const isVisible = .*?;$",
+            r"^const GS_LABELS = \[[\s\S]*?\];$"):
     m = re.search(pat, SRC, re.M)
     if not m:
         sys.exit("FAIL: หาโค้ดใน content.js ไม่เจอ -> %s" % pat)
     FUNCS.append(m.group(0))
-for name in ("findInputEl", "whyNoInput", "forceSend"):
+for name in ("findGsBtns", "findInputEl", "whyNoInput", "forceSend"):
     m = re.search(r"^function %s\(.*?^\}" % name, SRC, re.S | re.M)
     if not m:
         sys.exit("FAIL: หา function %s ใน content.js ไม่เจอ" % name)
@@ -50,6 +51,17 @@ function executeSendSteps(inputEl, text, resolve, mode) {
 
 const COMPOSER = '<div role="textbox" contenteditable="true" aria-label="ข้อความ" ' +
                  'id="composer" style="width:300px;height:30px"></div>';
+
+function btn(label, text, id) {
+  const b = document.createElement('div');
+  b.setAttribute('role', 'button');
+  if (label !== null) b.setAttribute('aria-label', label);
+  b.id = id;
+  b.innerText = text;
+  b.style.cssText = 'width:200px;height:30px';
+  b.addEventListener('click', () => order.push('click:' + id));
+  return b;
+}
 
 function addGetStarted() {
   const b = document.createElement('div');
@@ -119,6 +131,44 @@ async function run() {
   await forceSend('hi', 'messenger', false);
   out.repeat_send = { order: order.slice(), ms: Math.round(performance.now() - t0) };
 
+  // ★ เคสจริงของลูกค้า: แชทที่ยังไม่เคยคุยกับเพจ = ไม่มีกล่องพิมพ์เลยจนกว่าจะกดปุ่ม
+  freshPage('');
+  const gsOnly = document.createElement('div');
+  gsOnly.setAttribute('role', 'button');
+  gsOnly.id = 'gs';
+  gsOnly.style.cssText = 'width:120px;height:30px';
+  gsOnly.innerHTML = '<span dir="auto">\u0e40\u0e23\u0e34\u0e48\u0e21\u0e15\u0e49\u0e19' +
+                     '\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19 !</span>';
+  gsOnly.addEventListener('click', () => {
+    order.push('click:gs');
+    setTimeout(() => { document.getElementById('stage').innerHTML += COMPOSER; }, 300);
+  });
+  document.getElementById('stage').appendChild(gsOnly);
+  t0 = performance.now();
+  await forceSend('hi', 'messenger', false);
+  out.no_composer_until_click = { order: order.slice(), ms: Math.round(performance.now() - t0) };
+
+  // ปุ่มหลอกที่ข้อความยาว ต้องไม่โดนกด และปุ่มจริงที่ป้ายเป็น aria-label ต้องโดน
+  freshPage('');
+  const decoy = btn(null, '\u0e40\u0e23\u0e34\u0e48\u0e21\u0e15\u0e49\u0e19' +
+    '\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19\u0e01\u0e31\u0e1a\u0e42\u0e1b\u0e23\u0e41\u0e01\u0e23' +
+    '\u0e19\u0e35\u0e49\u0e44\u0e14\u0e49\u0e07\u0e48\u0e32\u0e22 \u0e46 \u0e40\u0e1e\u0e35\u0e22' +
+    '\u0e07\u0e01\u0e14\u0e1b\u0e38\u0e48\u0e21\u0e40\u0e14\u0e35\u0e22\u0e27', 'decoy_long');
+  const real = document.createElement('div');
+  real.setAttribute('role', 'button');
+  real.setAttribute('aria-label', '\u0e40\u0e23\u0e34\u0e48\u0e21\u0e15\u0e49\u0e19' +
+                                  '\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19');
+  real.id = 'real_gs';
+  real.style.cssText = 'width:120px;height:30px';
+  real.addEventListener('click', () => {
+    order.push('click:real_gs');
+    setTimeout(() => { document.getElementById('stage').innerHTML += COMPOSER; }, 200);
+  });
+  document.getElementById('stage').appendChild(decoy);
+  document.getElementById('stage').appendChild(real);
+  await forceSend('hi', 'messenger', false);
+  out.aria_only_button = { order: order.slice() };
+
   // หน้าที่ไม่มีกล่องพิมพ์เลย: ข้อความ error ต้องบอกสภาพหน้าจริง ไม่ใช่ประโยคลอย ๆ
   freshPage('<div role="button" aria-label="\u0e40\u0e23\u0e34\u0e48\u0e21\u0e15\u0e49\u0e19' +
             '\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19" style="width:99px;height:9px">x</div>');
@@ -181,6 +231,12 @@ def main():
     for case in ("late_button", "slow_page", "span_button"):
         if res[case]["order"] != ["click:gs", "type:composer"]:
             sys.exit("FAIL: %s ไม่ได้กดปุ่มก่อนพิมพ์ -> %s" % (case, res[case]["order"]))
+    if res["no_composer_until_click"]["order"] != ["click:gs", "type:composer"]:
+        sys.exit("FAIL: แชทที่ยังไม่มีกล่องพิมพ์ ต้องกดปุ่มแล้วพิมพ์ได้ -> %s"
+                 % res["no_composer_until_click"]["order"])
+    if res["aria_only_button"]["order"] != ["click:real_gs", "type:composer"]:
+        sys.exit("FAIL: ต้องกดปุ่มจริง (aria-label) ไม่ใช่ปุ่มหลอกข้อความยาว -> %s"
+                 % res["aria_only_button"]["order"])
     for case in ("no_button", "repeat_send"):
         if res[case]["order"] != ["type:composer"]:
             sys.exit("FAIL: %s พิมพ์ไม่ได้ -> %s" % (case, res[case]["order"]))
