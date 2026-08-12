@@ -120,8 +120,12 @@ function fetchTaskFromServer() {
                         chrome.storage.local.set({ monitoring_active: false }); // ปิด Monitor เมื่อกดส่งเอง
 
                         chrome.tabs.query({ url: ["*://*.facebook.com/*", "*://*.messenger.com/*"] }, async function(tabs) {
-                            if (tabs.length === 0) return;
+                            if (tabs.length === 0) {
+                                report(uniqueId, [{ url: "-", status: "ไม่มีแท็บ Facebook เปิดอยู่" }]);
+                                return;
+                            }
                             markTaskAsDone(uniqueId, data.task_id);
+                            const results = [];
 
                             for (const tab of tabs) {
                                 let tabMode = "messenger";
@@ -150,21 +154,67 @@ function fetchTaskFromServer() {
                                 const budgetMs = (tabMode === "like" || tabMode === "share")
                                     ? 30000
                                     : (Number(data.limit) || 1) * 1500 + 30000;
-                                await Promise.race([
-                                    chrome.tabs.sendMessage(tab.id, {
-                                        action: "runBot",
-                                        task: { ...data, mode: tabMode },
-                                        profileId: uniqueId
-                                    }).catch(() => {}),
-                                    new Promise(r => setTimeout(r, budgetMs))
-                                ]);
+                                const msg = {
+                                    action: "runBot",
+                                    task: { ...data, mode: tabMode },
+                                    profileId: uniqueId
+                                };
+                                results.push({
+                                    url: tab.url,
+                                    status: await runOnTab(tab.id, msg, budgetMs)
+                                });
                             }
+                            report(uniqueId, results);
                         });
                     }
                 }
             })
             .catch(err => {});
     });
+}
+
+// ponytail: เดิม sendMessage โดน .catch(()=>{}) ทิ้งทั้งผลสำเร็จและ error ที่ content.js
+// อุตส่าห์ส่งกลับมา แล้ว Promise.race กับ timer ทำให้ "ค้าง" หน้าตาเหมือน "สำเร็จ" เป๊ะ
+// = กดส่งแล้วเงียบ ไม่มีอะไรบอกว่าพังตรงไหน ต้องเดาเอาทุกรอบ ตอนนี้แยก 4 กรณีแล้วส่งกลับโปรแกรม
+async function runOnTab(tabId, msg, budgetMs) {
+    let timedOut = false;
+    const timer = new Promise(r => setTimeout(() => { timedOut = true; r(null); }, budgetMs));
+    let res = await Promise.race([sendOrInject(tabId, msg), timer]);
+    if (timedOut) return "ค้าง เกินเวลา (หน้าเว็บไม่ตอบ)";
+    if (!res) return "ไม่ได้คำตอบจากหน้าเว็บ";
+    if (res.error) return "❌ " + res.error;
+    if (res.status === "success") return "✅ สั่งงานแล้ว";
+    return String(res.status || "ไม่รู้ผล");
+}
+
+// ponytail: แท็บที่เปิดค้างไว้ตั้งแต่ก่อนติดตั้ง/ก่อนกด Reload ส่วนขยาย จะไม่มี content.js อยู่เลย
+// (Chrome ยัด content script ตอนโหลดหน้าเท่านั้น) เดิมเคสนี้เงียบสนิท ตอนนี้ยิงใส่เองแล้วลองใหม่
+async function sendOrInject(tabId, msg) {
+    try {
+        return await chrome.tabs.sendMessage(tabId, msg);
+    } catch (e) {
+        if (!/Receiving end does not exist|Could not establish connection/.test(e.message || "")) {
+            return { error: e.message };
+        }
+    }
+    try {
+        await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
+    } catch (e) {
+        return { error: "ใส่สคริปต์ในหน้าเว็บไม่ได้: " + e.message };
+    }
+    try {
+        return await chrome.tabs.sendMessage(tabId, msg);
+    } catch (e) {
+        return { error: "ส่วนขยายเข้าไม่ถึงหน้านี้ (ลองรีเฟรชหน้า Facebook): " + e.message };
+    }
+}
+
+function report(uniqueId, results) {
+    fetch(`http://localhost:5000/api/report/${uniqueId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ results })
+    }).catch(() => {});
 }
 
 function markTaskAsDone(uniqueId, taskId) {

@@ -347,9 +347,15 @@ runAutoMonitor();
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === "runBot") {
-        const mode = request.task.mode || "messenger"; 
+        const mode = request.task.mode || "messenger";
         const limit = request.task.limit || 1;
         const text = request.task.message;
+        // ponytail: ข้อความว่าง = พิมพ์ไม่มีอะไร กด Enter เปล่า Facebook ไม่ส่งอะไรเลย
+        // แต่เดิมตอบว่าสำเร็จ = "กดแล้วไม่มีอะไรเกิด" ที่หาสาเหตุไม่เจอ (ไลค์/แชร์ไม่ต้องมีข้อความ)
+        if (mode !== "like" && mode !== "share" && !(text || "").trim()) {
+            sendResponse({ status: "error", error: "ยังไม่ได้พิมพ์ข้อความที่จะส่ง" });
+            return true;
+        }
         const targetUrl = request.task.url_post || "";
         const isPageLink = request.task.is_page_link || false; 
         

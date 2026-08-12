@@ -78,4 +78,33 @@ res = client.get("/api/get-task/%s/uid_test" % tab.preset_key).get_json()
 check(res["status"] == "has_task", "API: ควรมีงาน ได้ %r" % res)
 check(res["mode"] == "like", "API: mode ควรเป็น like ได้ %r" % res.get("mode"))
 
-print("OK: สลับโหมดไลค์/แชร์แล้ว UI ถูก และคำสั่งส่งออกถูก")
+# --- ข้อความว่างต้องไม่ยอมสั่ง (พิมพ์เปล่า กด Enter เปล่า Facebook ไม่ส่งอะไรเลย) ---
+warned = []
+main.messagebox.showwarning = lambda t, m: warned.append(m)
+tab.var_mode.set("messenger")
+tab.text_msg.delete("1.0", main.tk.END)
+main.presets_data[tab.preset_key]["current_task_id"] = 0
+tab.action_send()
+check(warned and "พิมพ์ข้อความ" in warned[0], "ข้อความว่างต้องเตือน ได้ %r" % warned)
+check(main.presets_data[tab.preset_key]["current_task_id"] == 0,
+      "ข้อความว่างต้องไม่สั่งงานออกไป")
+
+# ไลค์/แชร์ ไม่ต้องมีข้อความ ต้องสั่งได้ตามเดิม
+warned.clear()
+tab.var_mode.set("share")
+tab.action_send()
+check(not warned, "โหมดแชร์ไม่ควรบังคับให้พิมพ์ข้อความ ได้ %r" % warned)
+
+# --- ผลจริงจากแต่ละแท็บต้องขึ้นบนหน้าจอ ---
+main.app.config.update(TESTING=True)
+client = main.app.test_client()
+client.get("/api/get-task/%s/uid_rep" % tab.preset_key)
+client.post("/api/report/uid_rep", json={"results": [
+    {"url": "https://www.messenger.com/t/abc", "status": "❌ ยังไม่ได้พิมพ์ข้อความที่จะส่ง"}]})
+tab.refresh_report()
+txt = tab.lbl_db_result.cget("text")
+check("ยังไม่ได้พิมพ์ข้อความ" in txt and tab.preset_key in txt,
+      "ผลล่าสุดควรขึ้นพร้อมชื่อ preset ได้ %r" % txt)
+check(tab.lbl_db_result.cget("fg") == "#dc3545", "ผลที่พังควรเป็นสีแดง")
+
+print("OK: สลับโหมดไลค์/แชร์แล้ว UI ถูก คำสั่งส่งออกถูก กันข้อความว่าง และโชว์ผลจริงต่อแท็บ")

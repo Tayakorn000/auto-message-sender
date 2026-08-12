@@ -16,7 +16,7 @@ from flask_cors import CORS
 # ==========================================
 # 0. อัปเดตอัตโนมัติ (ดูเวอร์ชันจาก GitHub Release)
 # ==========================================
-APP_VERSION = "1.6.6"
+APP_VERSION = "1.6.7"
 UPDATE_REPO = "Tayakorn000/auto-message-sender"
 UPDATE_API = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -209,6 +209,7 @@ profiles_completed = {}
 ui_command_queue = []
 ext_versions = {}  # uid ของแต่ละโปรไฟล์ Chrome -> เวอร์ชันส่วนขยายที่รันอยู่
 ext_profiles = {}  # uid -> preset ที่โปรไฟล์นั้นเลือกไว้ (เอาไว้บอกว่าโปรไฟล์ไหนตกรุ่น)
+ext_reports = {}   # uid -> (preset, [{url, status}]) ผลของครั้งล่าสุดที่สั่งงาน
 
 # หน้าต่างที่ถูกบัง/ไม่ได้อยู่หน้าสุด Chrome จะหน่วง timer เหลือ 1 ครั้ง/วินาที
 # ทำให้บอทค้างจนกว่าคนจะไปคลิกจอนั้นเอง แฟล็กชุดนี้ปิดการหน่วงทั้งหมด
@@ -258,6 +259,15 @@ def get_task(preset_group, unique_id):
         })
     else:
         return jsonify({"status": "no_task"})
+
+
+@app.route('/api/report/<unique_id>', methods=["POST"])
+def report(unique_id):
+    """ผลจริงของแต่ละแท็บหลังสั่งงาน (สำเร็จ/พังเพราะอะไร) — เดิมส่วนขยายทิ้งทั้งหมด"""
+    data = request.get_json(silent=True) or {}
+    ext_reports[unique_id] = (ext_profiles.get(unique_id, "?"),
+                              data.get("results") or [])
+    return jsonify({"status": "success"})
 
 
 @app.route('/api/mark-done/<unique_id>/<int:task_id>')
@@ -720,6 +730,12 @@ class PresetTab:
             messagebox.showwarning("แจ้งเตือน", f"กรุณาเปิดระบบก่อนสั่งงาน!")
             return
 
+        # ข้อความว่าง = พิมพ์ไม่มีอะไร กด Enter เปล่า Facebook ไม่ส่งอะไร แต่ทุกอย่างดูปกติหมด
+        if self.var_mode.get() not in ("like", "share") and \
+                not self.text_msg.get("1.0", tk.END).strip():
+            messagebox.showwarning("แจ้งเตือน", "ยังไม่ได้พิมพ์ข้อความที่จะส่ง")
+            return
+
         self.sw_reload.set_state(False)
         self.lbl_reload_text.config(fg="#6c757d")
 
@@ -932,6 +948,24 @@ class PresetTab:
         self.lbl_db_url = tk.Label(frame_status, text="-", bg="#f4f6f9", font=("Angsana New", 12), wraplength=320,
                                    justify="left")
         self.lbl_db_url.grid(row=3, column=1, sticky="w", padx=5)
+
+        # ผลจริงจากหน้าเว็บ ไม่ใช่แค่ "สั่งไปแล้ว" — กดแล้วไม่มีอะไรเกิดจะได้รู้ว่าติดตรงไหน
+        ttk.Label(frame_status, text="ผลล่าสุด:").grid(row=4, column=0, sticky="ne", pady=0)
+        self.lbl_db_result = tk.Label(frame_status, text="-", bg="#f4f6f9", font=("Angsana New", 13),
+                                      wraplength=320, justify="left")
+        self.lbl_db_result.grid(row=4, column=1, sticky="w", padx=5)
+        self.refresh_report()
+
+    def refresh_report(self):
+        lines = []
+        for preset, results in ext_reports.values():
+            for r in results:
+                url = (r.get("url") or "")[:48]
+                lines.append("%s → %s\n   %s" % (preset, r.get("status", "?"), url))
+        self.lbl_db_result.config(text="\n".join(lines) if lines else "ยังไม่ได้สั่งงาน",
+                                  fg="#dc3545" if any("❌" in x or "ค้าง" in x or "ไม่" in x
+                                                      for x in lines) else "#198754")
+        self.frame.after(1500, self.refresh_report)
 
 
 # --- สร้างหน้าต่างหลัก ---
