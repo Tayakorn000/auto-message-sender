@@ -465,10 +465,30 @@ function findInputEl(mode, isPhotoTarget) {
 let gsSettled = false;
 
 // 🟢 แยกระหว่าง "กล่องคอมเมนต์" กับ "กล่องแชท" อย่างเด็ดขาด!
+const GS_LABELS = ["เริ่มต้นใช้งาน", "get started"];
+
+// ponytail: "หาช่องพิมพ์ไม่เจอ" เฉย ๆ บอกอะไรไม่ได้เลย ต้องเดาต่อว่าหน้ายังโหลด/ต้องล็อกอิน/
+// หรือมีกล่องแต่คัดออกหมด — แนบสภาพหน้าจริงตอนยอมแพ้ไปด้วย จะได้จบในรอบเดียว
+function whyNoInput() {
+    const vis = el => el.offsetWidth > 0 && el.offsetHeight > 0;
+    const boxes = Array.from(document.querySelectorAll('[contenteditable="true"]'));
+    const gs = Array.from(document.querySelectorAll('[role="button"], button'))
+        .filter(b => GS_LABELS.includes(norm(b.innerText)) ||
+                     GS_LABELS.includes(norm(b.getAttribute("aria-label"))));
+    return "หาช่องพิมพ์ไม่เจอ (รอ 20 วิ" +
+           " | กล่องพิมพ์ " + boxes.filter(vis).length + "/" + boxes.length +
+           " | ปุ่มเริ่มต้นใช้งาน " + gs.length +
+           " | หน้า " + document.readyState +
+           (document.querySelector('input[name="pass"], form[action*="login"]') ? " | ยังไม่ได้ล็อกอิน" : "") +
+           ")";
+}
+
 function forceSend(text, mode, isPhotoTarget = false) {
     return new Promise((resolve, reject) => {
         let retryCount = 0;
-        const maxRetries = 300;
+        // ponytail: 300 รอบ × 10 ms = รอแค่ 3 วิ ซึ่งสั้นกว่าเวลาที่หน้า Facebook โหลดเสร็จ
+        // เปิดหลายโปรไฟล์พร้อมกันยิ่งช้า = ยอมแพ้ก่อนกล่องพิมพ์จะโผล่ (background ให้เวลา 30 วิ+ อยู่แล้ว)
+        const maxRetries = 2000;
         let getStartedClicked = false;
         let gsWaits = 0; // ponytail: นับแยกจาก retryCount ไม่งั้นหน้าโหลดช้าจะข้ามการรอไปเลย
 
@@ -478,7 +498,6 @@ function forceSend(text, mode, isPhotoTarget = false) {
                 // ponytail: ปุ่มไม่ได้เป็น div เสมอ และข้อความมักซ้อนอยู่ใน span ลูก
                 // เทียบ aria-label ด้วย + ล้าง NBSP/ช่องว่างซ้อนด้วย norm ตัวเดียวกับที่ไลค์/แชร์ใช้
                 // (ตัวเดิมดูแค่ div[role=button] + innerText ตรงเป๊ะ = เงื่อนไขแคบกว่าโค้ดไลค์/แชร์ในไฟล์เดียวกัน)
-                const GS_LABELS = ["เริ่มต้นใช้งาน", "get started"];
                 let getStartedBtns = Array.from(document.querySelectorAll(
                         'div[role="button"], span[role="button"], a[role="button"], button'
                     ))
@@ -520,7 +539,7 @@ function forceSend(text, mode, isPhotoTarget = false) {
                     if (commentBtns.length > 0) commentBtns[0].click(); 
                 }
                 retryCount++;
-                if (retryCount >= maxRetries) reject(new Error("หาช่องพิมพ์ไม่เจอ"));
+                if (retryCount >= maxRetries) reject(new Error(whyNoInput()));
                 else setTimeout(tryFindInput, 10); 
             }
         }

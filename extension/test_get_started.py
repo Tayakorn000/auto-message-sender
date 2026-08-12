@@ -22,12 +22,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 SRC = open(os.path.join(HERE, "content.js"), encoding="utf-8").read()
 FUNCS = []
-for pat in (r"^let gsSettled = false;$", r"^const norm = .*?;$"):
+for pat in (r"^let gsSettled = false;$", r"^const norm = .*?;$",
+            r"^const GS_LABELS = .*?;$"):
     m = re.search(pat, SRC, re.M)
     if not m:
         sys.exit("FAIL: หาโค้ดใน content.js ไม่เจอ -> %s" % pat)
     FUNCS.append(m.group(0))
-for name in ("findInputEl", "forceSend"):
+for name in ("findInputEl", "whyNoInput", "forceSend"):
     m = re.search(r"^function %s\(.*?^\}" % name, SRC, re.S | re.M)
     if not m:
         sys.exit("FAIL: หา function %s ใน content.js ไม่เจอ" % name)
@@ -118,6 +119,11 @@ async function run() {
   await forceSend('hi', 'messenger', false);
   out.repeat_send = { order: order.slice(), ms: Math.round(performance.now() - t0) };
 
+  // หน้าที่ไม่มีกล่องพิมพ์เลย: ข้อความ error ต้องบอกสภาพหน้าจริง ไม่ใช่ประโยคลอย ๆ
+  freshPage('<div role="button" aria-label="\u0e40\u0e23\u0e34\u0e48\u0e21\u0e15\u0e49\u0e19' +
+            '\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19" style="width:99px;height:9px">x</div>');
+  out.diag = whyNoInput();
+
   fetch('http://127.0.0.1:PORT_/result', {method:'POST', body: JSON.stringify(out)});
 }
 run();
@@ -182,6 +188,10 @@ def main():
         sys.exit("FAIL: ไม่มีปุ่ม แต่รอนานเกินไป %d ms" % res["no_button"]["ms"])
     if res["repeat_send"]["ms"] > 100:
         sys.exit("FAIL: ส่งซ้ำยังเสียเวลารอปุ่มอีก %d ms" % res["repeat_send"]["ms"])
+    d = res["diag"]
+    for want in ("กล่องพิมพ์ 0/0", "ปุ่มเริ่มต้นใช้งาน 1", "หน้า complete"):
+        if want not in d:
+            sys.exit("FAIL: ข้อความตอนหาไม่เจอควรมี %r -> %s" % (want, d))
     print("OK: กดปุ่มเริ่มต้นใช้งานก่อนพิมพ์เสมอ (ไม่ต้องพึ่งการติ๊กช่องลิงก์เพจ) "
           "ไม่ค้างเมื่อไม่มีปุ่ม และส่งซ้ำไม่เสียเวลารอ")
 
