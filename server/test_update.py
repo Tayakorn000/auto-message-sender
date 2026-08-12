@@ -134,7 +134,7 @@ seen = []
 main.download_and_restart(BASE + "/a.exe", lambda g, t: seen.append((g, t)))
 
 new_file = fake_exe + ".new"
-bat = fake_exe + ".update.bat"
+bat = os.path.join(os.path.dirname(fake_exe), "autosender_update.bat")
 check(os.path.exists(new_file), "ต้องมีไฟล์ .new")
 check(os.path.getsize(new_file) == len(STATE["exe"]), "ไฟล์ .new ต้องครบ")
 check(os.path.exists(bat), "ต้องเขียน .bat")
@@ -144,6 +144,24 @@ body = open(bat, encoding="ascii").read()
 check("move /y" in body and fake_exe in body, ".bat ต้องสลับไฟล์ตัวจริง")
 check('start "" "%s"' % fake_exe in body, ".bat ต้องเปิดโปรแกรมกลับมา")
 check("if %n% lss 30" in body, ".bat ต้องมีเพดานรอบ ไม่วนค้างตลอดกาล")
+
+# --- โฟลเดอร์ชื่อไทย: เดิมพังทันที "ascii codec can't encode characters" ---
+thai_dir = os.path.join(tmp, "โปรแกรมส่งข้อความ")
+os.makedirs(thai_dir, exist_ok=True)
+thai_exe = os.path.join(thai_dir, "main.exe")
+open(thai_exe, "wb").write(b"old")
+main.sys = types.SimpleNamespace(frozen=True, executable=thai_exe)
+launched.clear()
+main.download_and_restart(BASE + "/a.exe")
+thai_bat = os.path.join(main.short_path(thai_dir), "autosender_update.bat")
+check(os.path.exists(thai_bat), "path ไทยต้องเขียน .bat ได้ ไม่ใช่ throw")
+check(os.path.exists(thai_exe + ".new"), "path ไทยต้องโหลดไฟล์ใหม่ได้")
+check(launched, "path ไทยต้องสั่งรัน .bat")
+raw = open(thai_bat, "rb").read()
+check(b"move /y" in raw and b"start" in raw, ".bat ของ path ไทยต้องมีคำสั่งครบ")
+os.remove(thai_bat)
+os.remove(thai_exe + ".new")
+main.sys = types.SimpleNamespace(frozen=True, executable=fake_exe)
 
 # ไฟล์ไม่ครบต้องไม่ผ่าน และต้องลบทิ้ง
 os.remove(new_file)

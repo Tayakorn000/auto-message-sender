@@ -16,7 +16,7 @@ from flask_cors import CORS
 # ==========================================
 # 0. อัปเดตอัตโนมัติ (ดูเวอร์ชันจาก GitHub Release)
 # ==========================================
-APP_VERSION = "1.6.7"
+APP_VERSION = "1.6.8"
 UPDATE_REPO = "Tayakorn000/auto-message-sender"
 UPDATE_API = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -143,6 +143,20 @@ def update_extension(url, ext_dir, expect_version=None, timeout=60):
     return len(plan)
 
 
+def short_path(p):
+    """ชื่อไฟล์แบบ 8.3 ของ Windows (ASCII ล้วน) — คืนของเดิมถ้าเครื่องไม่ได้เปิดใช้"""
+    if os.name != "nt":
+        return p
+    try:
+        import ctypes
+        buf = ctypes.create_unicode_buffer(1024)
+        if ctypes.windll.kernel32.GetShortPathNameW(p, buf, 1024):
+            return buf.value
+    except Exception:
+        pass
+    return p
+
+
 def download_and_restart(url, on_progress=None):
     """โหลดไฟล์ใหม่ แล้วให้ .bat สลับไฟล์ตอนโปรแกรมปิด (Windows แทนที่ .exe ที่รันอยู่ไม่ได้)"""
     if not getattr(sys, "frozen", False):
@@ -168,22 +182,31 @@ def download_and_restart(url, on_progress=None):
         os.remove(new)
         raise RuntimeError("ไฟล์ที่โหลดมาไม่สมบูรณ์")
 
-    bat = exe + ".update.bat"
+    # ponytail: โฟลเดอร์ชื่อไทย = path มีอักษรไทย เขียน .bat แบบ ascii ไม่ได้ (พังทั้งการอัปเดต)
+    # ใช้ชื่อสั้น 8.3 ก่อน เพราะเป็น ASCII ล้วนเสมอ เครื่องที่ปิด 8.3 ไว้ค่อยตกไปใช้ cp874/ANSI
+    exe_s, new_s = short_path(exe), short_path(new)
+    bat = os.path.join(os.path.dirname(exe_s), "autosender_update.bat")
     # วนรอจนโปรแกรมปิดจริงแล้วค่อยสลับไฟล์ ครบ 30 รอบ (~30 วิ) แล้วยอมแพ้ ไม่วนค้าง
-    with open(bat, "w", encoding="ascii") as f:
-        f.write(
-            '@echo off\r\n'
-            'set /a n=0\r\n'
-            ':wait\r\n'
-            'ping -n 2 127.0.0.1 >nul\r\n'
-            f'move /y "{new}" "{exe}" >nul 2>&1\r\n'
-            'if not errorlevel 1 goto done\r\n'
-            'set /a n+=1\r\n'
-            'if %n% lss 30 goto wait\r\n'
-            ':done\r\n'
-            f'start "" "{exe}"\r\n'
-            'del "%~f0"\r\n'
-        )
+    body = (
+        '@echo off\r\n'
+        'set /a n=0\r\n'
+        ':wait\r\n'
+        'ping -n 2 127.0.0.1 >nul\r\n'
+        f'move /y "{new_s}" "{exe_s}" >nul 2>&1\r\n'
+        'if not errorlevel 1 goto done\r\n'
+        'set /a n+=1\r\n'
+        'if %n% lss 30 goto wait\r\n'
+        ':done\r\n'
+        f'start "" "{exe_s}"\r\n'
+        'del "%~f0"\r\n'
+    )
+    try:
+        body.encode("ascii")
+        enc = "ascii"
+    except UnicodeEncodeError:
+        enc = "mbcs" if os.name == "nt" else "utf-8"   # ไทยบน Windows = cp874 ทั้ง ANSI และ console
+    with open(bat, "w", encoding=enc) as f:
+        f.write(body)
     subprocess.Popen(["cmd", "/c", bat], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     return True
 
