@@ -55,6 +55,18 @@ CASES = {
            style="position:absolute;top:100px;width:300px;height:30px"></div>
       <div role="textbox" contenteditable="true" aria-label="เขียนความคิดเห็น"
            id="decoy_comment" style="position:absolute;top:500px;width:300px;height:30px"></div>''',
+    # ป้ายจริงของกล่องแชทหน้าเพจ (ดู DOM จริงบน facebook.com/<เพจ>)
+    # กล่องล่อไม่มีป้ายและอยู่ต่ำกว่า = ถ้าไม่รู้จักป้าย "write to" จะตกไปเดาตำแหน่งแล้วโดนตัวล่อ
+    "page_chat_write_to": '''
+      <div role="textbox" contenteditable="true" aria-label="Write to แปลมังงะ by Imtheone"
+           id="composer" style="position:absolute;top:100px;width:300px;height:30px"></div>
+      <div contenteditable="true" id="decoy_unlabeled"
+           style="position:absolute;top:500px;width:300px;height:30px"></div>''',
+    "page_chat_write_to_th": '''
+      <div role="textbox" contenteditable="true" aria-label="เขียนถึง ร้านค้าตัวอย่าง"
+           id="composer" style="position:absolute;top:100px;width:300px;height:30px"></div>
+      <div contenteditable="true" id="decoy_unlabeled"
+           style="position:absolute;top:500px;width:300px;height:30px"></div>''',
     # ไม่มีชื่อให้จับเลย + มีกล่องคอมเมนต์อยู่ล่างกว่า ต้องไม่ตกไปโดนกล่องคอมเมนต์
     "unlabeled_with_comment_below": '''
       <div contenteditable="true" id="composer"

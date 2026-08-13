@@ -439,8 +439,11 @@ function findInputEl(mode, isPhotoTarget) {
     }
 
     // โหมด Messenger: เลือกกล่องแชท ห้ามไปโดนกล่องคอมเมนต์
-    const GOOD = ["message", "ข้อความ", "ส่งข้อความ", "สนทนา", "chat", "เขียนข้อความ",
-                  "พิมพ์ข้อความ", "aa", "reply", "ตอบกลับ"];
+    // ponytail: "write to <ชื่อ>" / "เขียนถึง <ชื่อ>" คือป้ายจริงของกล่องแชทหน้าเพจ
+    // (ดู DOM จริงบน facebook.com/<เพจ> แล้ว) ไม่มีคำว่า message/ข้อความ เลยสักคำ
+    // เดิมตกมาถึงทางสุดท้าย (เดาจากตำแหน่งบนจอ) ซึ่งบังเอิญถูกตอนมีกล่องเดียว
+    const GOOD = ["message", "ข้อความ", "ส่งข้อความ", "สนทนา", "chat", "write to", "เขียนถึง",
+                  "เขียนข้อความ", "พิมพ์ข้อความ", "aa", "reply", "ตอบกลับ"];
     const named = validEls.filter(el => {
         const l = labelOf(el).trim();
         return GOOD.some(g => l.includes(g));
