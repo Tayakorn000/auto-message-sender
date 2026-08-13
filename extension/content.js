@@ -485,6 +485,23 @@ function findGsBtns() {
     return cands.filter(b => !cands.some(o => o !== b && b.contains(o)));
 }
 
+// ponytail: Messenger กั้นห้องแชทเก่าด้วยหน้าประกาศเข้ารหัส ต้องกด "ดำเนินการต่อ"/"Continue" ก่อน
+// ไม่กด = ไม่มีกล่องพิมพ์บนหน้าเลย (เจอกับตัวตอนทดสอบส่งจริง ได้ข้อความเดียวกับที่ลูกค้าเจอเป๊ะ:
+// "กล่องพิมพ์ 0/0 | ปุ่มเริ่มต้นใช้งาน 0")
+// กดเฉพาะตอนไม่มีกล่องพิมพ์เลย และห้ามโดนปุ่มล็อกอิน "ดำเนินการต่อในชื่อ ..." ของ messenger.com
+const GATE_LABELS = ["ดำเนินการต่อ", "continue"];
+const GATE_SKIP = ["ในชื่อ", "as ", "log in", "เข้าสู่ระบบ"];
+
+function findGateBtns() {
+    const hit = t => t && t.length <= 30 && GATE_LABELS.some(g => t.includes(g)) &&
+                     !GATE_SKIP.some(s => t.includes(s));
+    const cands = Array.from(document.querySelectorAll(
+            'div[role="button"], span[role="button"], a[role="button"], button'))
+        .filter(isVisible)
+        .filter(b => hit(norm(b.innerText)) || hit(norm(b.getAttribute("aria-label"))));
+    return cands.filter(b => !cands.some(o => o !== b && b.contains(o)));
+}
+
 // ponytail: "หาช่องพิมพ์ไม่เจอ" เฉย ๆ บอกอะไรไม่ได้เลย ต้องเดาต่อว่าหน้ายังโหลด/ต้องล็อกอิน/
 // หรือมีกล่องแต่คัดออกหมด — แนบสภาพหน้าจริงตอนยอมแพ้ไปด้วย จะได้จบในรอบเดียว
 function whyNoInput() {
@@ -496,6 +513,7 @@ function whyNoInput() {
     return "หาช่องพิมพ์ไม่เจอ (รอ 20 วิ" +
            " | กล่องพิมพ์ " + boxes.filter(vis).length + "/" + boxes.length +
            " | ปุ่มเริ่มต้นใช้งาน " + gs.length +
+           " | ปุ่มดำเนินการต่อ " + findGateBtns().length +
            " | หน้า " + document.readyState +
            (document.querySelector('input[name="pass"], form[action*="login"]') ? " | ยังไม่ได้ล็อกอิน" : "") +
            ")";
@@ -547,6 +565,14 @@ function forceSend(text, mode, isPhotoTarget = false, isPageLink = false) {
             if (inputEl) {
                 executeSendSteps(inputEl, text, resolve, mode); // ส่ง mode ไปด้วย
             } else {
+                // ไม่มีกล่องพิมพ์เลย = อาจโดนหน้าประกาศเข้ารหัสกั้นอยู่ กดผ่านให้ทีละปุ่ม
+                const gate = findGateBtns().filter(b => !gsClicked.has(b));
+                if (gate.length > 0) {
+                    gsClicked.add(gate[0]);
+                    gate[0].click();
+                    setTimeout(tryFindInput, 300);
+                    return;
+                }
                 if (mode === "post" && !isPhotoTarget && retryCount === 0) {
                     const commentBtns = Array.from(document.querySelectorAll('div[aria-label="แสดงความคิดเห็น"], div[aria-label="Leave a comment"], div[aria-label="Comment"]')).filter(btn => btn.offsetWidth > 0);
                     if (commentBtns.length > 0) commentBtns[0].click(); 

@@ -24,12 +24,14 @@ SRC = open(os.path.join(HERE, "content.js"), encoding="utf-8").read()
 FUNCS = []
 for pat in (r"^let gsSettled = false;$", r"^const norm = .*?;$",
             r"^const isVisible = .*?;$",
-            r"^const GS_LABELS = \[[\s\S]*?\];$"):
+            r"^const GS_LABELS = \[[\s\S]*?\];$",
+            r"^const GATE_LABELS = \[[\s\S]*?\];$",
+            r"^const GATE_SKIP = \[[\s\S]*?\];$"):
     m = re.search(pat, SRC, re.M)
     if not m:
         sys.exit("FAIL: หาโค้ดใน content.js ไม่เจอ -> %s" % pat)
     FUNCS.append(m.group(0))
-for name in ("findGsBtns", "findInputEl", "whyNoInput", "forceSend"):
+for name in ("findGsBtns", "findGateBtns", "findInputEl", "whyNoInput", "forceSend"):
     m = re.search(r"^function %s\(.*?^\}" % name, SRC, re.S | re.M)
     if not m:
         sys.exit("FAIL: หา function %s ใน content.js ไม่เจอ" % name)
@@ -176,6 +178,31 @@ async function run() {
   await forceSend('hi', 'messenger', false);
   out.aria_only_button = { order: order.slice() };
 
+  // ★ เคสจริงจาก Messenger: ห้องเก่าโดนหน้าประกาศเข้ารหัสกั้น ไม่มีกล่องพิมพ์จนกว่าจะกด Continue
+  // (เจอตอนทดสอบส่งจริง บอทรายงาน "กล่องพิมพ์ 0/0 | ปุ่มเริ่มต้นใช้งาน 0" เหมือนที่ลูกค้าเจอ)
+  freshPage('');
+  const gate = btn(null, 'Continue', 'gate');
+  gate.addEventListener('click', () => {
+    setTimeout(() => { document.getElementById('stage').innerHTML += COMPOSER; }, 200);
+  });
+  document.getElementById('stage').appendChild(gate);
+  t0 = performance.now();
+  await forceSend('hi', 'messenger', false);
+  out.encryption_gate = { order: order.slice(), ms: Math.round(performance.now() - t0) };
+
+  // ปุ่มล็อกอินของ messenger.com เขียนว่า "ดำเนินการต่อในชื่อ <ชื่อ>" ห้ามกดเด็ดขาด
+  freshPage('');
+  const login = btn(null, 'ดำเนินการต่อ' +
+                          'ในชื่อ Tayakorn', 'login_gate');
+  const realGate = btn(null, 'ดำเนินการต่อ', 'gate_th');
+  realGate.addEventListener('click', () => {
+    setTimeout(() => { document.getElementById('stage').innerHTML += COMPOSER; }, 200);
+  });
+  document.getElementById('stage').appendChild(login);
+  document.getElementById('stage').appendChild(realGate);
+  await forceSend('hi', 'messenger', false);
+  out.login_button_skipped = { order: order.slice() };
+
   // หน้าที่ไม่มีกล่องพิมพ์เลย: ข้อความ error ต้องบอกสภาพหน้าจริง ไม่ใช่ประโยคลอย ๆ
   freshPage('<div role="button" aria-label="\u0e40\u0e23\u0e34\u0e48\u0e21\u0e15\u0e49\u0e19' +
             '\u0e43\u0e0a\u0e49\u0e07\u0e32\u0e19" style="width:99px;height:9px">x</div>');
@@ -249,6 +276,11 @@ def main():
     if res["aria_only_button"]["order"] != ["click:real_gs", "type:composer"]:
         sys.exit("FAIL: ต้องกดปุ่มจริง (aria-label) ไม่ใช่ปุ่มหลอกข้อความยาว -> %s"
                  % res["aria_only_button"]["order"])
+    if res["encryption_gate"]["order"] != ["click:gate", "type:composer"]:
+        sys.exit("FAIL: ต้องกดปุ่ม Continue ที่กั้นหน้าอยู่ -> %s" % res["encryption_gate"]["order"])
+    if res["login_button_skipped"]["order"] != ["click:gate_th", "type:composer"]:
+        sys.exit("FAIL: ห้ามกดปุ่มล็อกอิน 'ดำเนินการต่อในชื่อ ...' -> %s"
+                 % res["login_button_skipped"]["order"])
     for case in ("no_button", "repeat_send"):
         if res[case]["order"] != ["type:composer"]:
             sys.exit("FAIL: %s พิมพ์ไม่ได้ -> %s" % (case, res[case]["order"]))
