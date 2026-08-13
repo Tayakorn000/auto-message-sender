@@ -125,7 +125,7 @@ function fetchTaskFromServer() {
                                 return;
                             }
                             markTaskAsDone(uniqueId, data.task_id);
-                            const results = [];
+                            const targets = [];
 
                             for (const tab of tabs) {
                                 let tabMode = "messenger";
@@ -142,15 +142,20 @@ function fetchTaskFromServer() {
 
                                 if (data.mode !== "all" && data.mode !== tabMode) continue;
 
-                                // ponytail: แท็บที่ถูกซ่อน (ไม่ใช่แท็บที่เลือกอยู่ในหน้าต่างนั้น) โดน Chrome
-                                // หน่วง timer เหลือ 1 ครั้ง/วินาที ลูป retry ในหน้าเว็บเลยค้างจนคนไปคลิกแท็บเอง
-                                // สั่งเลือกแท็บให้เองก่อนส่ง = แทนการคลิกจอ (ทีละแท็บ ไม่แย่งกัน)
-                                // ไม่สั่ง windows.update({focused}) เพราะเปิดพร้อมกันหลายโปรไฟล์
-                                // โฟกัสได้หน้าต่างเดียว ที่เหลือจะพัง + แย่งจอคนใช้
-                                await chrome.tabs.update(tab.id, { active: true }).catch(() => {});
-                                await new Promise(r => setTimeout(r, 150));
-                                // ponytail: กันแท็บเดียวค้างแล้วบล็อกแท็บที่เหลือ เผื่อเวลาตามจำนวนครั้งที่ส่ง
-                                // ไลค์/แชร์ ทำครั้งเดียวจบ ไม่ใช้ limit (ค่าค้างจากโหมดก่อนหน้าอาจเป็น 1000)
+                                targets.push({ tab, tabMode });
+                            }
+
+                            if (targets.length === 0) {
+                                report(uniqueId, [{ url: "-", status: "มีแท็บเปิดอยู่ แต่ไม่ตรงโหมดที่เลือก" }]);
+                                return;
+                            }
+
+                            // ponytail: ยิงทุกแท็บพร้อมกันเหมือนเวอร์ชันแรก เคยทำทีละแท็บ + สั่งสลับแท็บให้
+                            // + หน่วง 150 ms = กดส่งแล้วรอเห็น ๆ และแย่งแท็บที่คนกำลังดูอยู่
+                            // ที่แลกไป: แท็บที่ซ่อนอยู่นาน ๆ โดน Chrome หน่วง timer อาจช้าจนเกินเวลา
+                            // ซึ่งไม่เงียบแล้ว ขึ้น "ค้าง เกินเวลา" ในช่องผลล่าสุด (คลิกแท็บนั้นแล้วส่งใหม่)
+                            const results = await Promise.all(targets.map(({ tab, tabMode }) => {
+                                // กันแท็บที่ส่งหลายครั้งหมดเวลาก่อน ไลค์/แชร์ ทำครั้งเดียวจบ ไม่ใช้ limit
                                 const budgetMs = (tabMode === "like" || tabMode === "share")
                                     ? 30000
                                     : (Number(data.limit) || 1) * 1500 + 30000;
@@ -159,11 +164,9 @@ function fetchTaskFromServer() {
                                     task: { ...data, mode: tabMode },
                                     profileId: uniqueId
                                 };
-                                results.push({
-                                    url: tab.url,
-                                    status: await runOnTab(tab.id, msg, budgetMs)
-                                });
-                            }
+                                return runOnTab(tab.id, msg, budgetMs)
+                                    .then(status => ({ url: tab.url, status }));
+                            }));
                             report(uniqueId, results);
                         });
                     }

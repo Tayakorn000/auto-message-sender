@@ -1,5 +1,5 @@
-// เช็คว่า background.js สั่งโฟกัสหน้าต่าง + เลือกแท็บ ก่อนสั่ง runBot เสมอ
-// (ถ้าไม่สั่ง แท็บที่ถูกบังจะโดน Chrome หน่วง timer แล้วบอทค้างรอคนคลิกจอ)
+// เช็คว่า background.js ยิงทุกแท็บพร้อมกัน ไม่รอทีละแท็บ และไม่สั่งสลับแท็บ/โฟกัสหน้าต่าง
+// (เคยทำทีละแท็บ + สลับแท็บให้ = กดส่งแล้วหน่วง แล้วยังแย่งแท็บที่คนกำลังดูอยู่)
 // และเช็คว่าโหมดไลค์/แชร์ ยิงเฉพาะแท็บโพสต์ ไม่ยิงแท็บแชท
 // รัน: node test_background.js
 const assert = require('assert');
@@ -98,16 +98,29 @@ results.errored = runOnce(Object.assign({ mode: 'messenger' }, BASE), [CHAT_TAB]
 // ไม่มีแท็บ Facebook เปิดเลย เดิมเงียบสนิท
 results.notab = runOnce(Object.assign({ mode: 'messenger' }, BASE), []);
 
+// มีแท็บ แต่ไม่มีแท็บไหนตรงโหมด (โหมดคอมเมนต์โพสต์ แต่เปิดแต่แชท) ต้องบอก ไม่ใช่ว่างเปล่า
+results.nomatch = runOnce(Object.assign({ mode: 'post' }, BASE), [CHAT_TAB]);
+
+// ★ แท็บแรกตอบช้า 600 ms แท็บที่สองต้องถูกยิงทันที ไม่ใช่รอแท็บแรกจบ
+const CHAT_TAB2 = { id: 11, windowId: 3, url: 'https://www.messenger.com/t/xyz' };
+results.parallel = runOnce(Object.assign({ mode: 'messenger' }, BASE), [CHAT_TAB, CHAT_TAB2],
+    { sendMessage: (n, id) => new Promise(r => setTimeout(() => r({ status: 'success' }),
+                                                          id === 9 ? 600 : 0)) });
+let dispatchedEarly = null;
+setTimeout(() => { dispatchedEarly = results.parallel.filter(l => l.startsWith('sendMessage:')); }, 200);
+
 setTimeout(() => {
-    // เดิม: ต้องเลือกแท็บก่อนสั่ง runBot และห้ามโฟกัสหน้าต่าง
+    // กดส่งแล้วต้องไปเลย ห้ามสลับแท็บ/โฟกัสหน้าต่างให้ (แย่งจอคนใช้ + เสียเวลา)
     const log = results.messenger;
-    const iActive = log.findIndex(l => l.includes('"active":true'));
-    const iSend = log.findIndex(l => l.startsWith('sendMessage:'));
-    assert.ok(iActive >= 0, 'ต้องสั่งเลือกแท็บ (active:true) ก่อนส่ง: ' + log.join(' | '));
-    assert.ok(iSend >= 0, 'ต้องส่ง runBot: ' + log.join(' | '));
-    assert.ok(iActive < iSend, 'ลำดับผิด ต้องเลือกแท็บก่อน runBot: ' + log.join(' | '));
+    assert.ok(log.some(l => l.startsWith('sendMessage:')), 'ต้องส่ง runBot: ' + log.join(' | '));
+    assert.ok(!log.some(l => l.startsWith('tabs.update')),
+        'ห้ามสั่งสลับแท็บตอนส่ง จะแย่งแท็บที่คนกำลังดู + หน่วงเวลา: ' + log.join(' | '));
     assert.ok(!log.some(l => l.startsWith('windows.update')),
         'ห้ามสั่งโฟกัสหน้าต่าง จะแย่งจอคนใช้ + หลายโปรไฟล์โฟกัสพร้อมกันไม่ได้: ' + log.join(' | '));
+
+    // ยิงพร้อมกันจริง: แท็บแรกยังไม่ตอบ (600 ms) แท็บสองต้องถูกยิงไปแล้วตั้งแต่ 200 ms
+    assert.deepStrictEqual(dispatchedEarly, ['sendMessage:9:messenger', 'sendMessage:11:messenger'],
+        'ต้องยิงทุกแท็บพร้อมกัน ไม่ใช่รอทีละแท็บ: ' + JSON.stringify(dispatchedEarly));
 
     // ใหม่: ไลค์/แชร์ ยิงเฉพาะแท็บโพสต์ ไม่ยิงแท็บแชท
     for (const mode of ['like', 'share']) {
@@ -135,6 +148,9 @@ setTimeout(() => {
 
     assert.strictEqual(statusOf(results.notab), 'ไม่มีแท็บ Facebook เปิดอยู่',
         'ไม่มีแท็บต้องบอก ไม่ใช่เงียบ: ' + statusOf(results.notab));
+
+    assert.strictEqual(statusOf(results.nomatch), 'มีแท็บเปิดอยู่ แต่ไม่ตรงโหมดที่เลือก',
+        'แท็บไม่ตรงโหมดต้องบอก ไม่ใช่รายงานว่างเปล่า: ' + statusOf(results.nomatch));
 
     console.log('OK', JSON.stringify(results, null, 1));
     process.exit(0); // ตัด timer เผื่อเวลาที่ยังค้างอยู่ ไม่งั้น node ไม่ยอมจบ

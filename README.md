@@ -129,7 +129,7 @@ python3 server/test_gui_modes.py     # สลับโหมดแล้ว UI +
 python3 extension/test_find_input.py # หากล่องพิมพ์เจอโดยไม่ต้องคลิก
 python3 extension/test_get_started.py# กดปุ่มเริ่มต้นใช้งานก่อนพิมพ์เสมอ
 python3 extension/test_like_share.py # ไลค์/แชร์กดถูกปุ่ม
-node    extension/test_background.js # เลือกแท็บก่อนสั่งงาน + routing ตามโหมด
+node    extension/test_background.js # ยิงทุกแท็บพร้อมกัน ไม่สลับแท็บ + routing ตามโหมด
 ```
 
 เทสฝั่งส่วนขยายดึงฟังก์ชันตัวจริงออกจาก `content.js` / `background.js` มารันใน headless Chrome

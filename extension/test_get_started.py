@@ -96,11 +96,11 @@ async function run() {
   const out = {};
   const stage = document.getElementById('stage');
 
-  // เคส 1: กล่องพิมพ์มีตั้งแต่แรก ปุ่มเพิ่งโผล่ตอน 100 ms ต้องกดปุ่มก่อนพิมพ์
+  // เคส 1: ลิงก์เพจ กล่องพิมพ์มีตั้งแต่แรก ปุ่มเพิ่งโผล่ตอน 100 ms ต้องกดปุ่มก่อนพิมพ์
   freshPage(COMPOSER);
   setTimeout(addGetStarted, 100);
   let t0 = performance.now();
-  await forceSend('hi', 'messenger', false);
+  await forceSend('hi', 'messenger', false, true);
   out.late_button = { order: order.slice(), ms: Math.round(performance.now() - t0) };
 
   // เคส 2: หน้าโหลดช้า กล่องพิมพ์เพิ่งมา 500 ms ปุ่มตาม 600 ms
@@ -109,15 +109,22 @@ async function run() {
   setTimeout(() => { stage.innerHTML = COMPOSER; }, 500);
   setTimeout(addGetStarted, 600);
   t0 = performance.now();
-  await forceSend('hi', 'messenger', false);
+  await forceSend('hi', 'messenger', false, true);
   out.slow_page = { order: order.slice(), ms: Math.round(performance.now() - t0) };
 
   // เคส 3: ปุ่มเป็น span[role=button] ข้อความซ้อนใน span ลูก + NBSP (แบบที่ Facebook ใช้จริง)
   freshPage(COMPOSER);
   setTimeout(addGetStartedSpan, 100);
   t0 = performance.now();
-  await forceSend('hi', 'messenger', false);
+  await forceSend('hi', 'messenger', false, true);
   out.span_button = { order: order.slice(), ms: Math.round(performance.now() - t0) };
+
+  // ★ แชทธรรมดา (ไม่ติ๊กว่าเป็นลิงก์เพจ) กล่องพิมพ์พร้อมอยู่แล้ว = ต้องพิมพ์ทันที ห้ามหน่วงรอปุ่ม
+  freshPage(COMPOSER);
+  setTimeout(addGetStarted, 100);
+  t0 = performance.now();
+  await forceSend('hi', 'messenger', false);
+  out.fast_send = { order: order.slice(), ms: Math.round(performance.now() - t0) };
 
   // เคส 4: ไม่มีปุ่มเลย ต้องพิมพ์ได้ ไม่ค้าง
   freshPage(COMPOSER);
@@ -227,10 +234,15 @@ def main():
     res = RESULTS[0]
     print(json.dumps(res, ensure_ascii=False, indent=1))
 
-    # เคส 1-2 ไม่ได้บอกว่าเป็นลิงก์เพจเลย ต้องกดปุ่มให้เอง (ลูกค้าลืมติ๊กช่องก็ต้องทำงาน)
+    # ลิงก์เพจ = ยอมรอปุ่มที่ยัง render ไม่เสร็จ แล้วค่อยพิมพ์
     for case in ("late_button", "slow_page", "span_button"):
         if res[case]["order"] != ["click:gs", "type:composer"]:
             sys.exit("FAIL: %s ไม่ได้กดปุ่มก่อนพิมพ์ -> %s" % (case, res[case]["order"]))
+    # แชทธรรมดา = ห้ามหน่วง กดส่งแล้วต้องพิมพ์เลย (เคยหน่วงทุกแชท ลูกค้าบ่นว่าส่งช้า)
+    if res["fast_send"]["order"] != ["type:composer"]:
+        sys.exit("FAIL: แชทธรรมดาไม่ควรรอปุ่ม -> %s" % res["fast_send"]["order"])
+    if res["fast_send"]["ms"] > 60:
+        sys.exit("FAIL: กดส่งแล้วยังหน่วง %d ms ก่อนพิมพ์" % res["fast_send"]["ms"])
     if res["no_composer_until_click"]["order"] != ["click:gs", "type:composer"]:
         sys.exit("FAIL: แชทที่ยังไม่มีกล่องพิมพ์ ต้องกดปุ่มแล้วพิมพ์ได้ -> %s"
                  % res["no_composer_until_click"]["order"])

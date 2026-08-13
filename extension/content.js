@@ -387,7 +387,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
             for (let i = 0; i < limit; i++) {
                 try {
-                    await forceSend(text, mode, isPhotoTarget);
+                    await forceSend(text, mode, isPhotoTarget, isPageLink);
                     if (i < limit - 1) await new Promise(resolve => setTimeout(resolve, 1500)); 
                 } catch (err) {
                     sendResponse({ status: "error", error: err.message });
@@ -498,7 +498,7 @@ function whyNoInput() {
            ")";
 }
 
-function forceSend(text, mode, isPhotoTarget = false) {
+function forceSend(text, mode, isPhotoTarget = false, isPageLink = false) {
     return new Promise((resolve, reject) => {
         let retryCount = 0;
         // ponytail: 300 รอบ × 10 ms = รอแค่ 3 วิ ซึ่งสั้นกว่าเวลาที่หน้า Facebook โหลดเสร็จ
@@ -525,12 +525,13 @@ function forceSend(text, mode, isPhotoTarget = false) {
 
             let inputEl = findInputEl(mode, isPhotoTarget);
 
-            // ponytail: รอปุ่ม "เริ่มต้นใช้งาน" ได้อีกไม่เกิน 500 ms หลังเจอกล่องพิมพ์
+            // ponytail: เฉพาะลิงก์เพจ รอปุ่ม "เริ่มต้นใช้งาน" ได้อีกไม่เกิน 500 ms หลังเจอกล่องพิมพ์
             // โค้ดหากล่องตัวใหม่เจอกล่องเร็วกว่าที่ Facebook จะ render ปุ่มเสร็จ
             // ไม่รอ = ปุ่มไม่ถูกกด แล้วพิมพ์ลงกล่องที่ยังใช้งานไม่ได้ ส่งไม่ออก
-            // ไม่ผูกกับ is_page_link แล้ว — ลืมติ๊กช่อง "นี่คือลิงก์หน้าเพจ" ทีเดียวพังทั้งงาน
-            // ยอมเสีย 500 ms ครั้งเดียวต่อหน้า (gsSettled) แลกกับไม่ต้องพึ่งคนติ๊กถูก
-            if (inputEl && !gsSettled && gsClicked.size === 0 &&
+            // เคยเอาการรอออกมาใช้กับทุกแชท = กดส่งแล้วหน่วงทุกครั้ง ทั้งที่แชทธรรมดาไม่มีปุ่มนี้
+            // ลืมติ๊กช่องลิงก์เพจก็ยังใช้ได้ เพราะแชทที่ยังไม่เริ่มจะ "ไม่มีกล่องพิมพ์เลย"
+            // ลูปข้างบนจึงเจอปุ่มแล้วกดให้เองอยู่ดี การรอนี้กันแค่จังหวะปุ่มมาช้ากว่ากล่อง
+            if (inputEl && isPageLink && !gsSettled && gsClicked.size === 0 &&
                 (mode === "messenger" || mode === "all")) {
                 if (gsWaits < 50) {
                     gsWaits++;
