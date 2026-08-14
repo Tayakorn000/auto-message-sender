@@ -8,6 +8,7 @@ import re
 import sys
 import json
 import io
+import socket
 import zipfile
 import urllib.request
 from flask import Flask, jsonify, request
@@ -16,7 +17,7 @@ from flask_cors import CORS
 # ==========================================
 # 0. อัปเดตอัตโนมัติ (ดูเวอร์ชันจาก GitHub Release)
 # ==========================================
-APP_VERSION = "1.6.12"
+APP_VERSION = "1.6.13"
 UPDATE_REPO = "Tayakorn000/auto-message-sender"
 UPDATE_API = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -233,6 +234,7 @@ ui_command_queue = []
 ext_versions = {}  # uid ของแต่ละโปรไฟล์ Chrome -> เวอร์ชันส่วนขยายที่รันอยู่
 ext_profiles = {}  # uid -> preset ที่โปรไฟล์นั้นเลือกไว้ (เอาไว้บอกว่าโปรไฟล์ไหนตกรุ่น)
 ext_reports = {}   # uid -> (preset, [{url, status}]) ผลของครั้งล่าสุดที่สั่งงาน
+api_error = ""     # เปิดพอร์ต 5000 ไม่ได้ (ตั้งจากเธรด API เอาไปโชว์ในหน้าอัปเดต)
 
 # หน้าต่างที่ถูกบัง/ไม่ได้อยู่หน้าสุด Chrome จะหน่วง timer เหลือ 1 ครั้ง/วินาที
 # ทำให้บอทค้างจนกว่าคนจะไปคลิกจอนั้นเอง แฟล็กชุดนี้ปิดการหน่วงทั้งหมด
@@ -316,7 +318,25 @@ def run_api_server():
         sys.stdout = open(os.devnull, "w")
     if sys.stderr is None:
         sys.stderr = open(os.devnull, "w")
-    app.run(port=5000, debug=False, use_reloader=False)
+    global api_error
+    try:
+        # ลองจองพอร์ตเองก่อน — werkzeug เจอพอร์ตซ้ำแล้วสั่ง sys.exit() เลย
+        # เธรดนี้จึงหายไปดื้อ ๆ ดักด้วย except OSError รอบ app.run ไม่ทัน
+        probe = socket.socket()
+        probe.bind(("127.0.0.1", 5000))
+        probe.close()
+        app.run(port=5000, debug=False, use_reloader=False)
+    except OSError as e:
+        # ponytail: พอร์ต 5000 ถูกโปรแกรมอื่นยึดไว้ = เธรดนี้ตายเงียบ ๆ โปรแกรมดูปกติทุกอย่าง
+        # แต่ส่วนขยายยิงไปโดนโปรแกรมตัวนั้นแทน ได้ error CORS ที่ chrome://extensions
+        # ("No 'Access-Control-Allow-Origin' header") ซึ่งไม่มีใครเปิดดู
+        # เจอกับตัวบน Mac: AirPlay Receiver ของ macOS จอง TCP 5000 ตอบ 403 ทุก URL
+        # ไม่ย้ายพอร์ตให้ เพราะส่วนขยายทุกตัวที่แจกไปแล้วยิงมาที่ 5000 ตายตัว
+        api_error = ("⚠️ เปิดพอร์ต 5000 ไม่ได้ (%s)\n"
+                     "มีโปรแกรมอื่นยึดพอร์ตอยู่ ส่วนขยายจะไม่ได้รับคำสั่งเลยสักครั้ง\n"
+                     "• เปิดโปรแกรมนี้ค้างไว้อยู่แล้วอีกหน้าต่าง = ปิดตัวเก่าให้เหลือตัวเดียว\n"
+                     "• Windows: เปิด cmd พิมพ์  netstat -ano | findstr :5000  แล้วปิดโปรแกรมนั้น\n"
+                     "• Mac: ปิด AirPlay Receiver ใน ตั้งค่าระบบ > ทั่วไป > AirDrop & Handoff") % e
 
 
 # ==========================================
@@ -443,7 +463,10 @@ class SetupChromeTab:
         self.frame.winfo_toplevel().title(
             "Auto Messenger v%s%s" % (APP_VERSION,
                                       " | ส่วนขยาย " + ", ".join(seen) if seen else ""))
-        if old:
+        if api_error:
+            # ขึ้นก่อนทุกเรื่อง พอร์ตไม่ติด = ทั้งโปรแกรมสั่งอะไรไม่ได้เลย เรื่องอื่นไม่สำคัญแล้ว
+            self.lbl_ext.config(text=api_error, fg="#dc3545")
+        elif old:
             self.lbl_ext.config(
                 text="⚠️ โปรไฟล์ที่ยังใช้ส่วนขยายเวอร์ชันเก่า (%s)\n"
                      "ปิด Chrome ให้หมดแล้วเปิดใหม่ ถ้ายังเตือนอยู่แปลว่าโปรไฟล์นั้น "
